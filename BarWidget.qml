@@ -104,9 +104,11 @@ BarWidget {
       spacing: Style.spaceReal(5)
 
       MakerWorldMark {
+        id: mark
         anchors.verticalCenter: parent.verticalCenter
-        width: Math.round(button.height * 0.52)
-        height: width
+        readonly property int side: Math.max(12, Math.round((root.bar ? root.bar.barSize : 30) * 0.6))
+        width: side
+        height: side
         color: button.foreground
         opacity: root.expired ? 0.45 : 1
       }
