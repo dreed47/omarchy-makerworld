@@ -3,21 +3,23 @@ import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
 
-// Headless MakerWorld notifier.
+// Headless half of the MakerWorld plugin: polling, notifications, and the
+// shared state the bar pill / popup (BarWidget.qml, Panel.qml) read back.
 //
 // Every `pollSeconds` it asks the (unofficial) Bambu Cloud account API how many
-// unread items sit in each category. The first poll after startup is adopted
+// unread items sit in each category, and keeps the per-category totals on
+// `unreadByType` for the pill. The first poll after startup is adopted
 // silently as a baseline; after that, any category whose count went up triggers
 // a fetch of the recent message list, and each unseen item in an enabled
-// category raises one omarchy notification. A slower timer watches the point
-// balance on the profile and notifies when it rises.
+// category raises one omarchy notification. A slower timer tracks the point
+// balance (`points`) and notifies when it rises.
 //
 // Credentials come from ~/.config/omarchy/makerworld/token.json, written by
 // bin/makerworld-login. On a 401 the service runs bin/makerworld-refresh and
-// retries; if that fails it tells the user once to sign in again.
+// retries; if that fails it sets connState "expired" and tells the user once.
 //
-// There is no bar widget yet (planned for the next release), so settings live
-// in ~/.config/omarchy/makerworld/config.json rather than shell.json.
+// Settings: the bar widget's shell.json entry wins; anything unset there falls
+// back to ~/.config/omarchy/makerworld/config.json, then to built-in defaults.
 Item {
   id: root
 
@@ -40,18 +42,37 @@ Item {
   readonly property string configFile: confDir + "/config.json"
   function cli(name) { return pluginDir + "bin/" + name }
 
-  // ---- Config (config.json, live-reloaded) ---------------------------
-  property var cfg: Model.normalizedConfig(null)
+  // ---- Config: shell.json widget entry over config.json over defaults ----
+  property var configJsonRaw: ({})
+  readonly property var shellEntry: {
+    var sc = shell ? shell.shellConfig : null
+    if (!sc) return ({})
+    try {
+      if (sc.bar && sc.bar.layout) {
+        var secs = ["left", "center", "right"]
+        for (var s = 0; s < secs.length; s++) {
+          var arr = sc.bar.layout[secs[s]] || []
+          for (var i = 0; i < arr.length; i++)
+            if (arr[i] && String(arr[i].id) === root.pluginId) return arr[i]
+        }
+      }
+      var plugs = sc.plugins || []
+      for (var j = 0; j < plugs.length; j++)
+        if (plugs[j] && String(plugs[j].id) === root.pluginId) return plugs[j]
+    } catch (e) {}
+    return ({})
+  }
+  readonly property var cfg: Model.normalizedConfig(Model.mergeRaw(configJsonRaw, shellEntry))
 
   FileView {
     path: root.configFile
     watchChanges: true
     printErrors: false
     onLoaded: {
-      try { root.cfg = Model.normalizedConfig(JSON.parse(text())) }
-      catch (e) { root.cfg = Model.normalizedConfig(null) }
+      try { root.configJsonRaw = JSON.parse(text()) || ({}) }
+      catch (e) { root.configJsonRaw = ({}) }
     }
-    onLoadFailed: root.cfg = Model.normalizedConfig(null)
+    onLoadFailed: root.configJsonRaw = ({})
     onFileChanged: reload()
   }
 
@@ -76,23 +97,36 @@ Item {
         root.accessToken = ""
       }
       root.refreshFailedNotified = false
-      if (root.accessToken !== "") {
+      if (root.accessToken === "") {
+        root.connState = "notoken"
+      } else {
+        root.connState = "init"
         if (Model.tokenNeedsRefresh(root.tokenExp, Math.floor(Date.now() / 1000)))
           Qt.callLater(root.beginRefresh)
-        else
+        else {
           Qt.callLater(root.pollCounts)
+          Qt.callLater(root.pollProfile)
+        }
       }
     }
-    onLoadFailed: root.accessToken = ""
+    onLoadFailed: { root.accessToken = ""; root.connState = "notoken" }
     onFileChanged: reload()
   }
 
   // ---- Derived ------------------------------------------------------
-  readonly property bool canPoll: accessToken !== "" && cfg.notify === true
+  readonly property bool canPoll: accessToken !== ""
   readonly property var notifyTypes: cfg.notifyTypes || Model.KNOWN_TYPES
   readonly property int pollMs: Math.max(120, cfg.pollSeconds || 300) * 1000
   readonly property int profileMs: Math.max(5, cfg.profileMinutes || 15) * 60 * 1000
-  readonly property bool watchPoints: notifyTypes.indexOf("points") !== -1
+  readonly property bool notifyPoints: cfg.notify && notifyTypes.indexOf("points") !== -1
+
+  // ---- Live state the bar pill / popup read -----------------------
+  property var unreadByType: ({})
+  property int unreadTotal: 0
+  property double points: -1
+  property string profileName: ""
+  // "init" | "ok" | "expired" | "notoken"
+  property string connState: "init"
 
   // ---- Persisted state (survives a shell reload) -------------------
   PersistentProperties {
@@ -115,16 +149,23 @@ Item {
   // curl carries the auth header and appends the HTTP status after a marker so
   // onStreamFinished can tell 200 from 401 (curl without -f still prints the
   // error body, which we want for logging).
-  function curlArgs(url) {
-    return ["curl", "-sS", "--max-time", "20",
+  function curlArgs(url, extra) {
+    var a = ["curl", "-sS", "--max-time", "20",
       "-H", "Authorization: Bearer " + root.accessToken,
       "-H", "User-Agent: bambu_network_agent/01.09.05.01",
-      "-H", "Accept: application/json",
-      "-w", "\n__HTTP__%{http_code}", url]
+      "-H", "Accept: application/json"]
+    if (extra) for (var i = 0; i < extra.length; i++) a.push(extra[i])
+    a.push("-w"); a.push("\n__HTTP__%{http_code}"); a.push(url)
+    return a
   }
 
   function dbg(label, s) {
     if (root.cfg && root.cfg.debug) console.log("[makerworld]", label, String(s).slice(0, 1800))
+  }
+
+  function onAuthFail() {
+    root.connState = "expired"
+    root.beginRefresh()
   }
 
   // ---- Poll: unread counts -------------------------------------
@@ -140,12 +181,12 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         var r = Model.splitHttp(text)
-        if (r.status === 401 || r.status === 403) { root.beginRefresh(); return }
+        if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }
         if (r.status < 200 || r.status >= 300 || r.body === "") return
         try {
           var json = JSON.parse(r.body)
           root.dbg("counts", r.body)
-          if (Model.isAuthError(json)) { root.beginRefresh(); return }
+          if (Model.isAuthError(json)) { root.onAuthFail(); return }
           root.handleCounts(json)
         } catch (e) { root.dbg("counts parse error", e) }
       }
@@ -157,25 +198,31 @@ Item {
     var prev = {}
     try { prev = JSON.parse(state.lastCountsJson || "{}") || {} } catch (e) {}
 
+    // Always publish the current numbers for the pill / popup.
+    root.unreadByType = parsed.byType
+    root.unreadTotal = parsed.total || Model.unreadTotalOf(parsed.byType)
+    root.connState = "ok"
+    root.refreshFailedNotified = false
+
     if (!state.baselined) {
       state.lastCountsJson = JSON.stringify(parsed.byType)
-      state.lastTotal = parsed.total
+      state.lastTotal = root.unreadTotal
       state.baselined = true
       return
     }
 
-    var up = Model.diffCounts(prev, parsed.byType, state.lastTotal, parsed.total)
+    var up = Model.diffCounts(prev, parsed.byType, state.lastTotal, root.unreadTotal)
     state.lastCountsJson = JSON.stringify(parsed.byType)
-    state.lastTotal = parsed.total
+    state.lastTotal = root.unreadTotal
 
-    // Only bother pulling the list if an *enabled* category moved.
+    if (!root.cfg.notify) return
     var relevant = false
     for (var i = 0; i < up.length; i++)
       if (root.notifyTypes.indexOf(up[i]) !== -1) { relevant = true; break }
     if (relevant) root.fetchMessages()
   }
 
-  // ---- Poll: recent message list -----------------------------
+  // ---- Poll: recent message list (for notification text) ---------
   function fetchMessages() {
     if (messagesProc.running) return
     var limit = Math.max(10, (root.cfg.maxBurst || 5) * 3)
@@ -189,12 +236,12 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         var r = Model.splitHttp(text)
-        if (r.status === 401 || r.status === 403) { root.beginRefresh(); return }
+        if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }
         if (r.status < 200 || r.status >= 300 || r.body === "") return
         try {
           var json = JSON.parse(r.body)
           root.dbg("messages", r.body)
-          if (Model.isAuthError(json)) { root.beginRefresh(); return }
+          if (Model.isAuthError(json)) { root.onAuthFail(); return }
           root.handleMessages(json)
         } catch (e) { root.dbg("messages parse error", e) }
       }
@@ -217,9 +264,9 @@ Item {
     state.seenIdsJson = JSON.stringify(Model.mergeSeen(root.seenIds(), newIds, 300))
   }
 
-  // ---- Poll: point balance ----------------------------------
+  // ---- Poll: profile (point balance + display name) --------------
   function pollProfile() {
-    if (!canPoll || !watchPoints || profileProc.running) return
+    if (!canPoll || profileProc.running) return
     profileProc.command = curlArgs(Model.urlProfile(root.region))
     profileProc.running = true
   }
@@ -230,7 +277,7 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         var r = Model.splitHttp(text)
-        if (r.status === 401 || r.status === 403) { root.beginRefresh(); return }
+        if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }
         if (r.status < 200 || r.status >= 300 || r.body === "") return
         try {
           var json = JSON.parse(r.body)
@@ -242,16 +289,47 @@ Item {
   }
 
   function handleProfile(json) {
+    var name = Model.parseProfileName(json)
+    if (name !== "") root.profileName = name
+
     var pts = Model.parsePoints(json)
     if (pts === null) return
-    if (state.lastPoints >= 0 && pts > state.lastPoints) {
+    root.points = pts
+    root.connState = "ok"
+
+    if (root.notifyPoints && state.lastPoints >= 0 && pts > state.lastPoints) {
       var delta = pts - state.lastPoints
       root.enqueueNotify("MakerWorld points",
-        "+" + delta + "  (balance " + pts + ")",
+        "+" + delta + "  (balance " + Model.groupNum(pts) + ")",
         Model.glyphFor("points"),
         Model.siteBase(root.region) + "/en/my/points")
     }
     state.lastPoints = pts
+  }
+
+  // ---- Mark all read (called by the popup) -----------------------
+  function markAllRead() {
+    if (!canPoll || markReadProc.running) return
+    markReadProc.command = curlArgs(
+      Model.apiBase(root.region) + Model.PATHS.messageRead,
+      ["-X", "POST", "-H", "Content-Type: application/json", "-d", "{}"])
+    markReadProc.running = true
+  }
+
+  Process {
+    id: markReadProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var r = Model.splitHttp(text)
+        root.dbg("markread", String(r.status) + " " + r.body)
+        if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }
+        // Optimistically clear locally, then re-poll for the real numbers.
+        root.unreadByType = ({})
+        root.unreadTotal = 0
+        Qt.callLater(root.pollCounts)
+      }
+    }
   }
 
   // ---- Token refresh --------------------------------------
@@ -266,15 +344,18 @@ Item {
     onExited: function (code) {
       if (code === 0) {
         // token.json rewritten -> FileView.onFileChanged reloads it and
-        // re-kicks pollCounts. Nothing to do here but clear the flag.
+        // re-kicks the polls. Nothing to do here but clear the flag.
         root.refreshFailedNotified = false
+        root.connState = "init"
         tokenView.reload()
-      } else if (!root.refreshFailedNotified) {
-        root.refreshFailedNotified = true
-        root.enqueueNotify("MakerWorld sign-in expired",
-          "Run  makerworld-login  to reconnect",
-          Model.glyphFor("system"),
-          "")
+      } else {
+        root.connState = "expired"
+        if (!root.refreshFailedNotified) {
+          root.refreshFailedNotified = true
+          root.enqueueNotify("MakerWorld sign-in expired",
+            "Run  makerworld-login  to reconnect",
+            Model.glyphFor("system"), "")
+        }
       }
     }
   }
@@ -332,32 +413,38 @@ Item {
   Timer {
     id: profileTimer
     interval: root.profileMs
-    running: root.canPoll && root.watchPoints
+    running: root.canPoll
     repeat: true
     triggeredOnStart: true
     onTriggered: root.pollProfile()
   }
 
-  onCanPollChanged: if (canPoll) { Qt.callLater(pollCounts); if (watchPoints) Qt.callLater(pollProfile) }
+  onCanPollChanged: if (canPoll) { Qt.callLater(pollCounts); Qt.callLater(pollProfile) }
 
-  // Manual poke for testing: `omarchy-shell ipc call makerworld poll`
+  // ---- IPC (testing + popup actions) --------------------
   IpcHandler {
     target: "makerworld"
+    // Re-poll now, keeping the baseline (used by the popup's refresh).
+    function refresh(): void { Qt.callLater(root.pollCounts); Qt.callLater(root.pollProfile) }
+    // Drop the baseline so the next poll re-seeds without notifying, then poll.
     function poll(): void { root.resetBaselineAndPoll() }
+    function markRead(): void { root.markAllRead() }
     function status(): string {
       return JSON.stringify({
-        hasToken: root.accessToken !== "",
+        connState: root.connState,
         region: root.region,
         canPoll: root.canPoll,
         baselined: state.baselined,
-        lastTotal: state.lastTotal,
-        lastPoints: state.lastPoints,
+        unreadTotal: root.unreadTotal,
+        unreadByType: root.unreadByType,
+        points: root.points,
+        profileName: root.profileName,
+        notify: root.cfg.notify,
         notifyTypes: root.notifyTypes
       })
     }
   }
 
-  // Drop the baseline so the next poll re-seeds without notifying, then poll.
   function resetBaselineAndPoll() {
     state.baselined = false
     Qt.callLater(root.pollCounts)

@@ -120,8 +120,32 @@ var DEFAULT_CONFIG = {
   notifySound: "",
   maxBurst: 5,
   openOnClick: true,
+  showPoints: true,
   debug: false
 };
+
+// Accept booleans and the "on"/"off", "true"/"false", "yes"/"no", "1"/"0"
+// strings the bar's settings schema stores. `undefined` -> fallback.
+function truthy(value, fallback) {
+  if (value === undefined || value === null || value === "") return !!fallback;
+  if (typeof value === "boolean") return value;
+  var v = String(value).trim().toLowerCase();
+  return !(v === "off" || v === "false" || v === "no" || v === "0" || v === "disabled");
+}
+
+// Copy the non-empty keys of `over` onto a shallow clone of `base`. Used to lay
+// a bar-widget settings entry (partial, string-typed) over config.json.
+function mergeRaw(base, over) {
+  var out = {};
+  var b = (base && typeof base === "object") ? base : {};
+  var o = (over && typeof over === "object") ? over : {};
+  for (var k in b) out[k] = b[k];
+  for (var j in o) {
+    if (o[j] === undefined || o[j] === null || o[j] === "") continue;
+    out[j] = o[j];
+  }
+  return out;
+}
 
 function pickNotifyTypes(value) {
   var arr;
@@ -152,13 +176,14 @@ function normalizedConfig(raw) {
   if (src.region !== undefined) c.region = normalizedRegion(src.region);
   if (src.pollSeconds !== undefined) c.pollSeconds = Math.max(120, parseInt(src.pollSeconds, 10) || 300);
   if (src.profileMinutes !== undefined) c.profileMinutes = Math.max(5, parseInt(src.profileMinutes, 10) || 15);
-  if (src.notify !== undefined) c.notify = !!src.notify;
+  if (src.notify !== undefined) c.notify = truthy(src.notify, true);
   if (src.notifyTypes !== undefined) c.notifyTypes = pickNotifyTypes(src.notifyTypes);
   if (src.notifyTimeoutSeconds !== undefined) c.notifyTimeoutSeconds = Math.max(0, parseInt(src.notifyTimeoutSeconds, 10) || 0);
   if (src.notifySound !== undefined) c.notifySound = String(src.notifySound || "");
   if (src.maxBurst !== undefined) c.maxBurst = Math.max(1, Math.min(20, parseInt(src.maxBurst, 10) || 5));
-  if (src.openOnClick !== undefined) c.openOnClick = !!src.openOnClick;
-  if (src.debug !== undefined) c.debug = !!src.debug;
+  if (src.openOnClick !== undefined) c.openOnClick = truthy(src.openOnClick, true);
+  if (src.showPoints !== undefined) c.showPoints = truthy(src.showPoints, true);
+  if (src.debug !== undefined) c.debug = truthy(src.debug, false);
   return c;
 }
 
@@ -457,6 +482,55 @@ function parsePoints(json) {
   return isNaN(n) ? null : n;
 }
 
+// Display name / handle from /my/profile, best effort.
+function parseProfileName(json) {
+  var d = unwrap(json) || {};
+  var v = firstDefined(d, ["name", "nickName", "nickname", "userName", "displayName", "handle"]);
+  if (v === undefined && d.user && typeof d.user === "object") {
+    v = firstDefined(d.user, ["name", "nickName", "nickname", "userName", "displayName"]);
+  }
+  return v === undefined ? "" : String(v);
+}
+
+// ---- Bar-pill / panel display helpers ------------------------
+
+// Group digits with thousands separators: 1240 -> "1,240".
+function groupNum(n) {
+  var neg = n < 0;
+  var s = String(Math.abs(Math.round(n || 0)));
+  var out = "";
+  for (var i = 0; i < s.length; i++) {
+    if (i > 0 && (s.length - i) % 3 === 0) out += ",";
+    out += s[i];
+  }
+  return (neg ? "-" : "") + out;
+}
+
+function unreadTotalOf(byType) {
+  var t = 0;
+  var b = byType || {};
+  for (var k in b) t += (parseInt(b[k], 10) || 0);
+  return t;
+}
+
+// Categories with a non-zero unread count, in canonical order, with a glyph
+// and a human label. For the popup's chip row.
+var CLASS_LABEL = {
+  comment: "comments", reply: "replies", like: "likes",
+  follow: "followers", system: "system", points: "points", other: "other"
+};
+
+function unreadChips(byType) {
+  var b = byType || {};
+  var out = [];
+  for (var i = 0; i < KNOWN_TYPES.length; i++) {
+    var k = KNOWN_TYPES[i];
+    var n = parseInt(b[k], 10) || 0;
+    if (n > 0) out.push({ cls: k, label: CLASS_LABEL[k] || k, count: n, glyph: glyphFor(k) });
+  }
+  return out;
+}
+
 // ---- Small utilities --------------------------------------------
 
 function relTime(tsMs, nowMs) {
@@ -499,6 +573,8 @@ if (typeof module !== "undefined") {
     maskToken: maskToken,
     KNOWN_TYPES: KNOWN_TYPES,
     DEFAULT_CONFIG: DEFAULT_CONFIG,
+    truthy: truthy,
+    mergeRaw: mergeRaw,
     pickNotifyTypes: pickNotifyTypes,
     normalizedConfig: normalizedConfig,
     unwrap: unwrap,
@@ -515,6 +591,10 @@ if (typeof module !== "undefined") {
     selectFresh: selectFresh,
     mergeSeen: mergeSeen,
     parsePoints: parsePoints,
+    parseProfileName: parseProfileName,
+    groupNum: groupNum,
+    unreadTotalOf: unreadTotalOf,
+    unreadChips: unreadChips,
     relTime: relTime,
     splitHttp: splitHttp
   };

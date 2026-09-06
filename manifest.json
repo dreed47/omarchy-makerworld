@@ -2,15 +2,59 @@
   "schemaVersion": 1,
   "id": "io.github.dreed47.makerworld",
   "name": "MakerWorld",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "David Reed",
   "license": "MIT",
-  "description": "Desktop notifications for MakerWorld (Bambu Lab) account activity: new comments and replies, likes, new followers, system messages, and point-balance increases on your models. A headless service polls the Bambu Cloud account API on an interval and raises an omarchy notification for anything new; clicking it opens the model page. Unofficial - it uses the same endpoints the Bambu Handy app does, so you sign in once with the bundled makerworld-login helper. This first release is notifications only; a bar pill with the point balance and unread count is planned next.",
+  "description": "MakerWorld (Bambu Lab) activity in your Omarchy bar and as desktop notifications. A bar pill shows your point balance and an unread badge; its popup lists recent comments, replies, likes, followers, and system messages, opens any of them on makerworld.com, and can mark everything read. A headless service polls your Bambu Cloud account on an interval and raises a notification for anything new. Unofficial - it uses the same endpoints the Bambu Handy app does, so you sign in once with the bundled makerworld-login helper.",
   "kinds": [
-    "service"
+    "service",
+    "bar-widget"
   ],
   "keepLoaded": true,
   "entryPoints": {
-    "service": "Service.qml"
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "MakerWorld",
+    "description": "Point balance and unread badge for your MakerWorld account, with a popup of recent activity and desktop notifications for anything new.",
+    "category": "Info",
+    "aliases": [
+      "makerworld",
+      "maker world",
+      "bambu",
+      "bambu lab",
+      "3d printing",
+      "points",
+      "model comments"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "region": "global",
+      "pollSeconds": 300,
+      "profileMinutes": 15,
+      "notify": "on",
+      "notifyTypes": "comment,reply,like,follow,system,points",
+      "notifyTimeoutSeconds": 0,
+      "notifySound": "",
+      "maxBurst": 5,
+      "openOnClick": "on",
+      "showPoints": "on",
+      "debug": "off"
+    },
+    "schema": [
+      { "key": "region", "type": "string", "label": "Account region: global or china" },
+      { "key": "pollSeconds", "type": "int", "label": "Unread check interval (seconds, minimum 120)" },
+      { "key": "profileMinutes", "type": "int", "label": "Point-balance check interval (minutes, minimum 5)" },
+      { "key": "notify", "type": "string", "label": "Desktop notifications for new activity: on or off" },
+      { "key": "notifyTypes", "type": "string", "label": "Notify for which categories (comma list): comment,reply,like,follow,system,points - or 'all'" },
+      { "key": "notifyTimeoutSeconds", "type": "int", "label": "Auto-dismiss notification after N seconds (0 = notification-daemon default)" },
+      { "key": "notifySound", "type": "string", "label": "Sound file to play on each notification (blank = silent)" },
+      { "key": "maxBurst", "type": "int", "label": "Max notifications per check (1-20), so a backlog can't flood you" },
+      { "key": "openOnClick", "type": "string", "label": "Clicking a notification opens the page: on or off" },
+      { "key": "showPoints", "type": "string", "label": "Show the point balance in the bar pill: on or off" },
+      { "key": "debug", "type": "string", "label": "Log raw API responses to the shell log: on or off" }
+    ]
   }
 }

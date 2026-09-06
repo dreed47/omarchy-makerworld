@@ -1,14 +1,20 @@
-# MakerWorld notifications for Omarchy
+# MakerWorld for Omarchy
 
-Desktop notifications for activity on your [MakerWorld](https://makerworld.com)
-(Bambu Lab) models — new comments and replies, likes, new followers, system
-messages, and point-balance increases. A headless Omarchy shell service polls
-your Bambu Cloud account on an interval and raises an `omarchy-notification-send`
-notification for anything new. Click a notification to open the model page.
+Your [MakerWorld](https://makerworld.com) (Bambu Lab) account in the Omarchy
+bar and as desktop notifications — new comments and replies, likes, new
+followers, system messages, and point-balance changes.
 
-> **Phase 1 — notifications only.** A bar pill showing the point balance and
-> unread count, an in-panel message list, and "mark all read" are planned for
-> 0.2. See `CHANGELOG.md`.
+- **Bar pill** — point balance and an unread badge, with a warning triangle if
+  the sign-in lapses.
+- **Popup** — point balance, unread-by-category chips, a list of recent activity
+  (click a row to open it on makerworld.com), "Mark all read", "Open
+  MakerWorld", and a settings gear.
+- **Notifications** — a headless service polls on an interval and raises an
+  `omarchy-notification-send` notification for anything new; clicking it opens
+  the page.
+
+The pill/popup and the notifier are one plugin; you can mount just the service
+(no bar widget) if you only want notifications.
 
 ## Unofficial API — read this first
 
@@ -54,34 +60,47 @@ bin/makerworld-token --paste
 
 ## Configuration
 
-`~/.config/omarchy/makerworld/config.json` (live-reloaded — no restart needed).
-See `config.example.json`.
+Two layers, highest priority first:
+
+1. **The bar widget's settings** — the popup's gear, or `omarchy-bar set
+   io.github.dreed47.makerworld <key> <value>`. Stored in `shell.json`.
+2. **`~/.config/omarchy/makerworld/config.json`** — live-reloaded, used for any
+   key the widget entry doesn't set (and the only option surface if you don't
+   mount the bar widget). See `config.example.json`.
+
+Both accept booleans and `"on"`/`"off"`.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `region` | `"global"` | `"global"` (api.bambulab.com) or `"china"` (api.bambulab.cn) |
 | `pollSeconds` | `300` | unread-count poll interval; floored at 120 |
 | `profileMinutes` | `15` | point-balance poll interval; floored at 5 |
-| `notify` | `true` | master switch; `false` stops all polling |
+| `notify` | `on` | desktop notifications for new activity |
 | `notifyTypes` | all | any of `comment`, `reply`, `like`, `follow`, `system`, `points` (or `"all"`) |
 | `notifyTimeoutSeconds` | `0` | auto-dismiss after N seconds (0 = notification-daemon default) |
 | `notifySound` | `""` | path to a sound file played on each notification (blank = silent) |
 | `maxBurst` | `5` | cap notifications raised per poll, so a backlog can't flood you |
-| `openOnClick` | `true` | clicking a notification runs `xdg-open` on the model/message URL |
-| `debug` | `false` | log raw API responses to the shell log to help adjust parsers |
+| `openOnClick` | `on` | clicking a notification runs `xdg-open` on the model/message URL |
+| `showPoints` | `on` | show the point balance in the bar pill |
+| `debug` | `off` | log raw API responses to the shell log to help adjust parsers |
 
 ## How it works
 
-- `Service.qml` — the headless service. `Timer` → `curl` (via Quickshell
-  `Process`) → parse → notify. First poll after start is adopted as a **silent
-  baseline**, so enabling the plugin doesn't replay your existing unread
-  backlog. Notified message IDs are kept in a bounded ring buffer in
-  `PersistentProperties` so a shell reload doesn't re-notify.
+- `Service.qml` — headless. `Timer` → `curl` (via Quickshell `Process`) →
+  parse → notify. First poll after start is adopted as a **silent baseline**,
+  so enabling the plugin doesn't replay your existing unread backlog. Notified
+  message IDs live in a bounded ring buffer in `PersistentProperties` so a
+  shell reload doesn't re-notify. Publishes `points`, `unreadByType`,
+  `unreadTotal`, `profileName`, `connState` for the pill/popup.
+- `BarWidget.qml` / `Panel.qml` — the pill and its popup. The popup makes its
+  own `/my/messages` fetch for the activity list (when opened, then every 2
+  min while open); the service owns the count poll and notifications.
 - On HTTP 401/403 the service runs `bin/makerworld-refresh`. If that fails it
-  raises one "sign-in expired — run `makerworld-login`" notification and stops
-  until `token.json` changes.
-- `Model.js` — all URLs, response parsing, message classification, and the
-  notify/seen bookkeeping. Pure functions, covered by `tests/`.
+  raises one "sign-in expired — run `makerworld-login`" notification, shows a
+  warning triangle on the pill, and waits for `token.json` to change.
+- `Model.js` — all URLs, response parsing, message classification, config
+  normalisation, and notify/seen bookkeeping. Pure functions, covered by
+  `tests/`.
 
 ### CLI tools
 
@@ -95,7 +114,9 @@ See `config.example.json`.
 
 ```sh
 qs -c omarchy ipc call makerworld status    # dump service state as JSON
+qs -c omarchy ipc call makerworld refresh   # poll now, keep the baseline
 qs -c omarchy ipc call makerworld poll      # re-baseline then poll now
+qs -c omarchy ipc call makerworld markRead  # mark all messages read
 ```
 
 ## Development

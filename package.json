@@ -1,7 +1,7 @@
 {
   "name": "omarchy-makerworld",
-  "version": "0.1.0",
-  "description": "Desktop notifications for MakerWorld (Bambu Lab) account activity. Omarchy shell plugin.",
+  "version": "0.2.0",
+  "description": "MakerWorld (Bambu Lab) bar pill and desktop notifications. Omarchy shell plugin.",
   "private": true,
   "scripts": {
     "test": "node --test",

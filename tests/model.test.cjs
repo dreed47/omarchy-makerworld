@@ -61,6 +61,56 @@ test("normalizedConfig clamps and defaults", () => {
   assert.deepEqual(d.notifyTypes, M.KNOWN_TYPES);
 });
 
+test("truthy accepts bools and on/off strings", () => {
+  assert.equal(M.truthy(true), true);
+  assert.equal(M.truthy(false), false);
+  assert.equal(M.truthy("on"), true);
+  assert.equal(M.truthy("off"), false);
+  assert.equal(M.truthy("false"), false);
+  assert.equal(M.truthy("0"), false);
+  assert.equal(M.truthy("yes"), true);
+  assert.equal(M.truthy(undefined, true), true);
+  assert.equal(M.truthy("", false), false);
+});
+
+test("mergeRaw lays non-empty override keys over base", () => {
+  const merged = M.mergeRaw(
+    { region: "global", pollSeconds: 300, notify: true },
+    { region: "china", pollSeconds: "", notify: "off", extra: "x" }
+  );
+  assert.equal(merged.region, "china");
+  assert.equal(merged.pollSeconds, 300, "empty string does not override");
+  assert.equal(merged.notify, "off");
+  assert.equal(merged.extra, "x");
+});
+
+test("normalizedConfig reads bar-schema on/off strings", () => {
+  const c = M.normalizedConfig({ notify: "off", showPoints: "off", openOnClick: "on", debug: "on" });
+  assert.equal(c.notify, false);
+  assert.equal(c.showPoints, false);
+  assert.equal(c.openOnClick, true);
+  assert.equal(c.debug, true);
+  assert.equal(M.normalizedConfig(null).showPoints, true, "default on");
+});
+
+test("groupNum / unreadTotalOf / unreadChips", () => {
+  assert.equal(M.groupNum(1240), "1,240");
+  assert.equal(M.groupNum(5), "5");
+  assert.equal(M.groupNum(1234567), "1,234,567");
+  assert.equal(M.groupNum(-2500), "-2,500");
+  assert.equal(M.unreadTotalOf({ comment: 2, like: 3, follow: 0 }), 5);
+  const chips = M.unreadChips({ like: 3, comment: 1, bogus: 9 });
+  assert.deepEqual(chips.map((c) => c.cls), ["comment", "like"], "known types only, canonical order");
+  assert.equal(chips[0].count, 1);
+  assert.equal(typeof chips[1].glyph, "string");
+});
+
+test("parseProfileName", () => {
+  assert.equal(M.parseProfileName({ data: { nickName: "Dave" } }), "Dave");
+  assert.equal(M.parseProfileName({ user: { name: "Dave R" } }), "Dave R");
+  assert.equal(M.parseProfileName({ nope: 1 }), "");
+});
+
 test("pickNotifyTypes aliases + all", () => {
   assert.deepEqual(M.pickNotifyTypes("followers,fans").sort(), ["follow"]);
   assert.deepEqual(M.pickNotifyTypes("all"), M.KNOWN_TYPES);
