@@ -486,6 +486,56 @@ test("normalizedConfig: notifyMilestones", () => {
   assert.equal(M.normalizedConfig(null).notifyMilestones, true);
 });
 
+// ---- "My models" tab -----------------------------------------
+
+const MY_DESIGNS = {
+  total: 42,
+  hits: [
+    {
+      id: 159401, title: "Wago 221 Connector Box", slug: "wago-221-connector-box",
+      coverUrl: "https://x/c.png", likeCount: 575, collectionCount: 300, shareCount: 0,
+      printCount: 470, commentCount: 12, downloadCount: 941, readCount: 0, boostCnt: 3,
+      instances: [{ big: "payload we ignore" }],
+    },
+    {
+      id: 462884, title: "The Princess Bride Buttercup Dagger", slug: "buttercup-dagger",
+      likeCount: 279, printCount: 227, downloadCount: 434, commentCount: 4,
+    },
+    { id: 71028, title: "Cleveland Browns Lightbox", downloadCount: 210, likeCount: 88, printCount: 190 },
+  ],
+};
+
+test("parseMyDesigns keeps only stat fields + builds slug URL", () => {
+  const p = M.parseMyDesigns(MY_DESIGNS, "global");
+  assert.equal(p.total, 42);
+  assert.equal(p.designs.length, 3);
+  const d0 = p.designs[0];
+  assert.equal(d0.id, "159401");
+  assert.equal(d0.downloads, 941);
+  assert.equal(d0.likes, 575);
+  assert.equal(d0.prints, 470);
+  assert.equal(d0.comments, 12);
+  assert.equal(d0.boosts, 3);
+  assert.equal(d0.url, "https://makerworld.com/en/models/159401-wago-221-connector-box");
+  assert.equal(d0.instances, undefined, "bulk payload dropped");
+  // missing slug -> bare id URL
+  assert.equal(p.designs[2].url, "https://makerworld.com/en/models/71028");
+});
+
+test("sortDesigns by each stat, descending, non-mutating", () => {
+  const p = M.parseMyDesigns(MY_DESIGNS, "global");
+  assert.deepEqual(M.sortDesigns(p.designs, "downloads").map((d) => d.id), ["159401", "462884", "71028"]);
+  assert.deepEqual(M.sortDesigns(p.designs, "likes").map((d) => d.id), ["159401", "462884", "71028"]);
+  assert.deepEqual(M.sortDesigns(p.designs, "prints").map((d) => d.id), ["159401", "462884", "71028"]);
+  assert.equal(p.designs[0].id, "159401", "input order untouched");
+});
+
+test("urlMyDesigns / designUrl", () => {
+  assert.match(M.urlMyDesigns("global", 60, 0), /design-service\/my\/design\/published\?limit=60&offset=0$/);
+  assert.equal(M.designUrl("global", 5, "my-slug"), "https://makerworld.com/en/models/5-my-slug");
+  assert.equal(M.designUrl("global", 5, ""), "https://makerworld.com/en/models/5");
+});
+
 // ---- misc ----------------------------------------------------
 
 test("splitHttp separates body and status", () => {

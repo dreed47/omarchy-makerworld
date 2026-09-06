@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **"My models" popup tab** — lists your published designs from
+  `/v1/design-service/my/design/published` with per-model downloads, likes,
+  prints and comment counts; sort by downloads / likes / prints; click a row
+  to open the model. Fetched lazily the first time the tab is opened. The
+  popup now has an Activity / My models tab strip.
+
 - **Download / like milestones** — the profile poll tracks lifetime downloads
   and likes received across your models; crossing a round number fires a
   "Your models passed N downloads" notification. Cadence scales with size

@@ -7,9 +7,13 @@ expiry.
 
 - **Bar pill** — the MakerWorld cube mark, your point balance, and an unread
   badge; a warning triangle if the sign-in lapses.
-- **Popup** — point balance, boost-token and follower counts, unread-by-category
-  chips, a list of recent activity (click a row to open it on makerworld.com),
-  "Mark all read", a link to the notification centre, and a settings gear.
+- **Popup** — point balance, boost-token / follower / download / like counts,
+  and two tabs:
+  - **Activity** — unread-by-category chips, recent comments/replies/likes/etc.
+    (click a row to open it on makerworld.com), "Mark all read".
+  - **My models** — your published designs with per-model downloads, likes,
+    prints and comments; sort by any of them, click through to the model.
+  Plus a settings gear.
 - **Notifications** — a headless service polls on an interval and raises an
   `omarchy-notification-send` notification for anything new; clicking it opens
   the relevant page. Includes:
@@ -140,9 +144,10 @@ Both accept booleans and `"on"`/`"off"`.
   count, and lifetime download / like totals (a crossed round number → a
   milestone notification); when you hold a token it also scans system messages
   for MakerWorld's own expiry reminder and warns once per token.
-- `BarWidget.qml` / `Panel.qml` — the pill and its popup. The popup makes its
-  own per-category `/my/messages` fetch for the activity list (when opened,
-  then every 2 min while open); the service owns polling and notifications.
+- `BarWidget.qml` / `Panel.qml` — the pill and its popup. The Activity tab
+  makes its own per-category `/my/messages` fetch (when opened, then every 2
+  min); the My models tab lazily fetches `/design-service/my/design/published`
+  the first time it's opened. The service owns polling and notifications.
 - On HTTP 401/403 the service runs `bin/makerworld-refresh`. If that fails it
   raises one "sign-in expired — run `makerworld-login`" notification, shows a
   warning triangle on the pill, and waits for `token.json` to change.

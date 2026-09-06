@@ -39,6 +39,7 @@ var PATHS = {
   messages: "/v1/user-service/my/messages",
   messageRead: "/v1/user-service/my/message/read",
   profile: "/v1/design-user-service/my/profile",
+  myDesigns: "/v1/design-service/my/design/published",
   refreshToken: "/v1/user-service/user/refreshtoken"
 };
 
@@ -706,6 +707,56 @@ function myModelsUrl(region) {
   return siteBase(region) + "/en/my/models";
 }
 
+// ---- "My models" tab -------------------------------------------
+//
+// GET /v1/design-service/my/design/published?limit=&offset= -> { total, hits:[...] }.
+// Each hit is large (creator, presets, compatibility, ...); we keep only the
+// stat fields. Per-model `downloadCount` here is design-file downloads, so the
+// portfolio sum is lower than the profile's headline `downloadCount` (which
+// also counts print-profile downloads).
+function urlMyDesigns(region, limit, offset) {
+  return apiBase(region) + PATHS.myDesigns
+    + "?limit=" + encodeURIComponent(String(limit || 20))
+    + "&offset=" + encodeURIComponent(String(offset || 0));
+}
+
+function designUrl(region, id, slug) {
+  var s = String(slug || "").trim();
+  return siteBase(region) + "/en/models/" + String(id) + (s ? "-" + s : "");
+}
+
+function parseMyDesigns(json, region) {
+  var d = unwrap(json) || {};
+  var hits = Array.isArray(d.hits) ? d.hits
+    : (Array.isArray(d.list) ? d.list : (Array.isArray(d) ? d : []));
+  var out = [];
+  for (var i = 0; i < hits.length; i++) {
+    var h = hits[i] || {};
+    if (h.id === undefined) continue;
+    out.push({
+      id: String(h.id),
+      title: String(h.title || h.titleTranslated || "Untitled"),
+      downloads: parseInt(h.downloadCount, 10) || 0,
+      likes: parseInt(h.likeCount, 10) || 0,
+      prints: parseInt(h.printCount, 10) || 0,
+      collections: parseInt(h.collectionCount, 10) || 0,
+      comments: parseInt(h.commentCount, 10) || 0,
+      boosts: parseInt(h.boostCnt, 10) || 0,
+      coverUrl: String(h.coverUrl || ""),
+      url: designUrl(region, h.id, h.slug)
+    });
+  }
+  return { total: parseInt(d.total, 10) || out.length, designs: out };
+}
+
+// Sort a parsed design list in place by a stat key, descending.
+function sortDesigns(designs, key) {
+  var k = key || "downloads";
+  return (designs || []).slice().sort(function (a, b) {
+    return (b[k] || 0) - (a[k] || 0);
+  });
+}
+
 // ---- Creator stat milestones ------------------------------------
 //
 // Total downloads / likes / collections received across all your models,
@@ -901,6 +952,10 @@ if (typeof module !== "undefined") {
     followersUrl: followersUrl,
     boostPageUrl: boostPageUrl,
     myModelsUrl: myModelsUrl,
+    urlMyDesigns: urlMyDesigns,
+    designUrl: designUrl,
+    parseMyDesigns: parseMyDesigns,
+    sortDesigns: sortDesigns,
     STAT_LABEL: STAT_LABEL,
     STAT_GLYPH: STAT_GLYPH,
     profileStat: profileStat,

@@ -90,10 +90,57 @@ Panel {
   }
   readonly property string statusGlyph: coinGlyph
 
+  // ---- Popup tabs --------------------------------------------------
+  property string tab: "activity"   // "activity" | "models"
+  property string designSort: "downloads"   // "downloads" | "likes" | "prints"
+
   // ---- Recent-activity list (this panel's own fetch) -----------------
   property var messages: []
   property bool loading: false
   property string listError: ""
+
+  // ---- "My models" list -----------------------------------------
+  property var myDesigns: []
+  property int myDesignsTotal: 0
+  property bool designsLoading: false
+  property bool designsLoaded: false
+  property string designsError: ""
+
+  function fetchDesigns() {
+    if (accessToken === "" || designsProc.running) return
+    root.designsLoading = true
+    designsProc.command = ["curl", "-sS", "--max-time", "25",
+      "-H", "Authorization: Bearer " + accessToken,
+      "-H", "User-Agent: bambu_network_agent/01.09.05.01",
+      "-H", "Accept: application/json",
+      "-w", "\n__HTTP__%{http_code}",
+      Model.urlMyDesigns(region, 60, 0)]
+    designsProc.running = true
+  }
+
+  Process {
+    id: designsProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.designsLoading = false
+        var r = Model.splitHttp(text)
+        if (r.status === 401 || r.status === 403) { root.designsError = "sign-in expired"; return }
+        if (r.status < 200 || r.status >= 300) { root.designsError = "HTTP " + r.status; return }
+        try {
+          var parsed = Model.parseMyDesigns(JSON.parse(r.body), root.region)
+          root.myDesigns = parsed.designs
+          root.myDesignsTotal = parsed.total
+          root.designsLoaded = true
+          root.designsError = ""
+        } catch (e) {
+          root.designsError = "could not read the response"
+        }
+      }
+    }
+  }
+
+  readonly property var sortedDesigns: Model.sortDesigns(root.myDesigns, root.designSort)
 
   // Recent activity is pulled one notification category at a time (comments,
   // model activity, system, community - not print jobs) and merged newest-first.
@@ -102,6 +149,7 @@ Panel {
 
   function refresh() {
     if (svc) { if (svc.pollCounts) svc.pollCounts(); if (svc.pollProfile) svc.pollProfile() }
+    if (root.tab === "models" && !root.designsLoaded) root.fetchDesigns()
     if (accessToken === "" || listProc.running || root.catQueue.length > 0) return
     root.loading = true
     root.catResults = []
@@ -162,6 +210,10 @@ Panel {
   function openMyModels() {
     // The notification centre - the thing this popup mirrors.
     openUrl(Model.messagesPageUrl(region))
+  }
+  function selectTab(t) {
+    root.tab = t
+    if (t === "models" && !root.designsLoaded) root.fetchDesigns()
   }
   function markAllRead() {
     if (svc && svc.markAllRead) svc.markAllRead()
@@ -463,6 +515,39 @@ Panel {
             }
           }
 
+          // ---- Tab strip: Activity | My models
+          Row {
+            width: parent.width
+            spacing: Style.space(14)
+            Repeater {
+              model: [
+                { key: "activity", label: "Activity" },
+                { key: "models", label: "My models" }
+              ]
+              Text {
+                required property var modelData
+                text: modelData.label
+                color: root.tab === modelData.key ? Color.accent : root.dim
+                font.family: root.mono
+                font.pixelSize: Style.font.caption
+                font.letterSpacing: 1
+                font.bold: root.tab === modelData.key
+                MouseArea {
+                  anchors.fill: parent
+                  anchors.margins: -Style.space(4)
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.selectTab(modelData.key)
+                }
+              }
+            }
+          }
+
+          // ================= ACTIVITY TAB =================
+          Column {
+          visible: root.tab === "activity"
+          width: parent.width
+          spacing: Style.space(12)
+
           // ---- Recent activity list
           Text {
             width: parent.width
@@ -616,6 +701,143 @@ Panel {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.openMyModels()
+              }
+            }
+          }
+          }
+          // ================= MY MODELS TAB =================
+          Column {
+            visible: root.tab === "models"
+            width: parent.width
+            spacing: Style.space(8)
+
+            Item {
+              width: parent.width
+              height: sortRow.implicitHeight
+              Text {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: "MY MODELS" + (root.myDesignsTotal > 0 ? "  ·  " + root.myDesignsTotal : "")
+                color: root.dim
+                font.family: root.mono
+                font.pixelSize: Style.font.caption
+                font.letterSpacing: 1
+              }
+              Row {
+                id: sortRow
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(10)
+                Repeater {
+                  model: [
+                    { key: "downloads", label: "↓" },
+                    { key: "likes", label: "♥" },
+                    { key: "prints", label: "⎙" }
+                  ]
+                  Text {
+                    required property var modelData
+                    text: modelData.label
+                    color: root.designSort === modelData.key ? Color.accent : root.dim
+                    font.family: root.mono
+                    font.pixelSize: Style.font.caption
+                    MouseArea {
+                      anchors.fill: parent
+                      anchors.margins: -Style.space(3)
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.designSort = modelData.key
+                    }
+                  }
+                }
+              }
+            }
+
+            Text {
+              visible: root.myDesigns.length === 0
+              width: parent.width
+              text: root.designsLoading ? "loading your models…"
+                : (root.designsError !== "" ? "Couldn't load: " + root.designsError
+                  : "No published models.")
+              color: root.dim
+              font.family: root.mono
+              font.pixelSize: Style.font.caption
+            }
+
+            Rectangle {
+              visible: root.myDesigns.length > 0
+              width: parent.width
+              height: Math.min(Style.space(300), dCol.implicitHeight + Style.space(4))
+              radius: Style.cornerRadius
+              color: "transparent"
+              border.width: 1
+              border.color: Qt.darker(root.fg, 1.8)
+              clip: true
+              Flickable {
+                anchors.fill: parent
+                anchors.margins: Style.space(2)
+                contentWidth: width
+                contentHeight: dCol.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
+                interactive: contentHeight > height
+                Column {
+                  id: dCol
+                  width: parent.width
+                  Repeater {
+                    model: root.sortedDesigns
+                    Rectangle {
+                      required property var modelData
+                      width: dCol.width
+                      height: dRow.implicitHeight + Style.space(10)
+                      color: dArea.containsMouse
+                        ? (root.bar ? Style.hoverFillFor(root.fg, Color.accent) : "#2a2a2a") : "transparent"
+                      Column {
+                        id: dRow
+                        x: Style.space(8)
+                        y: Style.space(5)
+                        width: parent.width - Style.space(16)
+                        spacing: Style.space(2)
+                        Text {
+                          width: parent.width
+                          text: modelData.title
+                          color: root.fg
+                          font.family: root.mono
+                          font.pixelSize: Style.font.caption
+                          font.bold: true
+                          elide: Text.ElideRight
+                        }
+                        Text {
+                          text: "↓ " + Model.groupNum(modelData.downloads)
+                            + "    ♥ " + Model.groupNum(modelData.likes)
+                            + "    ⎙ " + Model.groupNum(modelData.prints)
+                            + (modelData.comments > 0 ? "    " + Model.glyphFor("comment") + " " + modelData.comments : "")
+                          color: root.dim
+                          font.family: root.mono
+                          font.pixelSize: Style.font.caption - 1
+                        }
+                      }
+                      MouseArea {
+                        id: dArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.openUrl(modelData.url)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+            Text {
+              width: parent.width
+              horizontalAlignment: Text.AlignRight
+              text: "All models on MakerWorld " + String.fromCharCode(0x2197)
+              color: Color.accent
+              font.family: root.mono
+              font.pixelSize: Style.font.caption
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.openUrl(Model.myModelsUrl(root.region))
               }
             }
           }
