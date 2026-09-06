@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Download / like milestones** — the profile poll tracks lifetime downloads
+  and likes received across your models; crossing a round number fires a
+  "Your models passed N downloads" notification. Cadence scales with size
+  (250s below 1k, 1,000s in the thousands, 5,000s past 10k, …). Toggle with
+  `notifyMilestones` (default on). Popup shows the running totals.
+
 - **Follower alerts** — the profile poll now tracks `fanCount`; a rise fires a
   "N new followers" notification (gated by the `follow` notify type). This is
   the follow path, since no message-API category surfaces new followers.

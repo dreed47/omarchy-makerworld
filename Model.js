@@ -147,6 +147,7 @@ var DEFAULT_CONFIG = {
   openOnClick: true,
   showPoints: true,
   boostExpiryWarnDays: 5,
+  notifyMilestones: true,
   debug: false
 };
 
@@ -212,6 +213,7 @@ function normalizedConfig(raw) {
   if (src.boostExpiryWarnDays !== undefined) {
     c.boostExpiryWarnDays = Math.max(0, Math.min(30, parseInt(src.boostExpiryWarnDays, 10) || 5));
   }
+  if (src.notifyMilestones !== undefined) c.notifyMilestones = truthy(src.notifyMilestones, true);
   if (src.debug !== undefined) c.debug = truthy(src.debug, false);
   return c;
 }
@@ -700,6 +702,57 @@ function boostPageUrl(region) {
   return siteBase(region) + "/en/my/creator-center/boost";
 }
 
+function myModelsUrl(region) {
+  return siteBase(region) + "/en/my/models";
+}
+
+// ---- Creator stat milestones ------------------------------------
+//
+// Total downloads / likes / collections received across all your models,
+// from /my/profile. `downloadCount` is the headline number MakerWorld shows
+// on a creator page; `likeCount` / `collectionCount` are received (not given).
+var STAT_KEYS = {
+  downloads: ["downloadCount", "downloadsCount", "totalDownload", "totalDownloads"],
+  likes: ["likeCount", "likesCount", "totalLike", "totalLikes"],
+  collections: ["collectionCount", "collectionsCount", "totalCollection", "favoritedCount"]
+};
+
+var STAT_LABEL = { downloads: "downloads", likes: "likes", collections: "collections" };
+
+var STAT_GLYPH = {
+  downloads: String.fromCharCode(0xf019), // nf-fa-download
+  likes: String.fromCharCode(0xf004),     // nf-fa-heart
+  collections: String.fromCharCode(0xf02e) // nf-fa-bookmark
+};
+
+function profileStat(json, metric) {
+  var d = unwrap(json) || {};
+  var v = firstDefined(d, STAT_KEYS[metric] || []);
+  if (v === undefined) return null;
+  var n = parseInt(v, 10);
+  return isNaN(n) ? null : n;
+}
+
+// Notification cadence for a running total: fine-grained when small, coarser
+// as it grows, so a big creator is not pinged every few hundred.
+function milestoneStep(n) {
+  if (n < 1000) return 250;
+  if (n < 10000) return 1000;
+  if (n < 100000) return 5000;
+  if (n < 1000000) return 25000;
+  return 100000;
+}
+
+// The highest round number in (prev, cur] worth announcing, or 0 for none.
+// prev < 0 means "no baseline yet" -> never announces (seed silently).
+function highestMilestoneCrossed(prev, cur) {
+  if (prev === undefined || prev === null || prev < 0) return 0;
+  if (!(cur > prev)) return 0;
+  var step = milestoneStep(cur);
+  var m = Math.floor(cur / step) * step;
+  return (m > prev && m > 0) ? m : 0;
+}
+
 // Scan raw notification messages for boost-token expiry info and return the
 // soonest *future* expiry: { ms, iso, rightId } or null. Uses both the
 // dedicated "expire remind" message and the original "granted" message.
@@ -847,6 +900,12 @@ if (typeof module !== "undefined") {
     parseBoostCount: parseBoostCount,
     followersUrl: followersUrl,
     boostPageUrl: boostPageUrl,
+    myModelsUrl: myModelsUrl,
+    STAT_LABEL: STAT_LABEL,
+    STAT_GLYPH: STAT_GLYPH,
+    profileStat: profileStat,
+    milestoneStep: milestoneStep,
+    highestMilestoneCrossed: highestMilestoneCrossed,
     boostExpirySoonest: boostExpirySoonest,
     untilTime: untilTime,
     isoDate: isoDate,

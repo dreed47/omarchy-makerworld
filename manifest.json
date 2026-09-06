@@ -42,6 +42,7 @@
       "openOnClick": "on",
       "showPoints": "on",
       "boostExpiryWarnDays": 5,
+      "notifyMilestones": "on",
       "debug": "off"
     },
     "schema": [
@@ -56,6 +57,7 @@
       { "key": "openOnClick", "type": "string", "label": "Clicking a notification opens the page: on or off" },
       { "key": "showPoints", "type": "string", "label": "Show the point balance in the bar pill: on or off" },
       { "key": "boostExpiryWarnDays", "type": "int", "label": "Warn this many days before a boost token expires (0 = off, needs 'points' notifications on)" },
+      { "key": "notifyMilestones", "type": "string", "label": "Notify when your models pass a round download / like total: on or off" },
       { "key": "debug", "type": "string", "label": "Log raw API responses to the shell log: on or off" }
     ]
   }

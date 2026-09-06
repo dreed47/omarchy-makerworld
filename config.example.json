@@ -10,5 +10,6 @@
   "openOnClick": true,
   "showPoints": true,
   "boostExpiryWarnDays": 5,
+  "notifyMilestones": true,
   "debug": false
 }

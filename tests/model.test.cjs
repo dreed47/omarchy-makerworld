@@ -380,6 +380,7 @@ const PROFILE = {
   name: "dreed10", handle: "dreed10", uid: 654298191,
   point: 7841, pointRegular: 4469, pointExclusive: 3372.8,
   boost: 0, boostGained: 207, fanCount: 194, followCount: 1,
+  downloadCount: 11550, likeCount: 2221, collectionCount: 6223, myLikeCount: 8,
 };
 
 test("parse profile: name, handle, followers, boost", () => {
@@ -450,6 +451,39 @@ test("normalizedConfig: boostExpiryWarnDays clamp", () => {
   assert.equal(M.normalizedConfig({ boostExpiryWarnDays: -3 }).boostExpiryWarnDays, 0);
   assert.equal(M.normalizedConfig({ boostExpiryWarnDays: "7" }).boostExpiryWarnDays, 7);
   assert.equal(M.normalizedConfig(null).boostExpiryWarnDays, 5);
+});
+
+// ---- creator stat milestones -----------------------------------
+
+test("profileStat reads received download/like/collection totals", () => {
+  assert.equal(M.profileStat(PROFILE, "downloads"), 11550);
+  assert.equal(M.profileStat(PROFILE, "likes"), 2221);
+  assert.equal(M.profileStat(PROFILE, "collections"), 6223);
+  assert.equal(M.profileStat({ data: { downloadCount: "9" } }, "downloads"), 9);
+  assert.equal(M.profileStat({ nope: 1 }, "downloads"), null);
+});
+
+test("milestoneStep scales with size", () => {
+  assert.equal(M.milestoneStep(400), 250);
+  assert.equal(M.milestoneStep(5000), 1000);
+  assert.equal(M.milestoneStep(50000), 5000);
+  assert.equal(M.milestoneStep(500000), 25000);
+  assert.equal(M.milestoneStep(5000000), 100000);
+});
+
+test("highestMilestoneCrossed", () => {
+  assert.equal(M.highestMilestoneCrossed(-1, 5000), 0, "no baseline -> silent");
+  assert.equal(M.highestMilestoneCrossed(11400, 11550), 0, "no round number crossed");
+  assert.equal(M.highestMilestoneCrossed(9500, 10600), 10000, "crossed 10k");
+  assert.equal(M.highestMilestoneCrossed(950, 1300), 1000, "crossed tier boundary");
+  assert.equal(M.highestMilestoneCrossed(2999, 3000), 3000, "exact landing counts");
+  assert.equal(M.highestMilestoneCrossed(3000, 3000), 0, "no change");
+  assert.equal(M.highestMilestoneCrossed(3200, 3100), 0, "went down");
+});
+
+test("normalizedConfig: notifyMilestones", () => {
+  assert.equal(M.normalizedConfig({ notifyMilestones: "off" }).notifyMilestones, false);
+  assert.equal(M.normalizedConfig(null).notifyMilestones, true);
 });
 
 // ---- misc ----------------------------------------------------

@@ -131,6 +131,8 @@ Item {
   property double points: -1
   property int followerCount: -1
   property int boostTokens: -1
+  property int totalDownloads: -1
+  property int totalLikes: -1
   property string profileName: ""
   property string profileHandle: ""
   // "init" | "ok" | "expired" | "notoken"
@@ -146,6 +148,8 @@ Item {
     property double lastPoints: -1
     property double lastFanCount: -1
     property double lastBoostCount: -1
+    property double lastDownloads: -1
+    property double lastLikes: -1
     property string boostWarnedId: ""    // boostingRightId we've already warned about
     property bool baselined: false
   }
@@ -362,6 +366,29 @@ Item {
       if (boost > 0 && root.notifyPoints && cfg.boostExpiryWarnDays > 0)
         Qt.callLater(root.checkBoostExpiry)
     }
+
+    // ---- Download / like milestones ----
+    var doWarn = root.cfg.notify && root.cfg.notifyMilestones
+    var dl = Model.profileStat(json, "downloads")
+    if (dl !== null) {
+      root.totalDownloads = dl
+      if (doWarn) root.maybeMilestone("downloads", state.lastDownloads, dl)
+      state.lastDownloads = dl
+    }
+    var lk = Model.profileStat(json, "likes")
+    if (lk !== null) {
+      root.totalLikes = lk
+      if (doWarn) root.maybeMilestone("likes", state.lastLikes, lk)
+      state.lastLikes = lk
+    }
+  }
+
+  function maybeMilestone(metric, prev, cur) {
+    var m = Model.highestMilestoneCrossed(prev, cur)
+    if (m <= 0) return
+    root.enqueueNotify("MakerWorld milestone",
+      "Your models passed " + Model.groupNum(m) + " " + Model.STAT_LABEL[metric],
+      Model.STAT_GLYPH[metric], Model.myModelsUrl(root.region))
   }
 
   // ---- Boost-token expiry warning -------------------------------
@@ -534,6 +561,8 @@ Item {
         points: root.points,
         followerCount: root.followerCount,
         boostTokens: root.boostTokens,
+        totalDownloads: root.totalDownloads,
+        totalLikes: root.totalLikes,
         profileName: root.profileName,
         profileHandle: root.profileHandle,
         boostWarnedId: state.boostWarnedId,

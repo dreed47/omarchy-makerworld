@@ -17,6 +17,8 @@ expiry.
   - **new followers** (from a change in your follower count)
   - **points up**, a **new boost token**, and a **boost token about to expire**
     (`boostExpiryWarnDays` before, using MakerWorld's own reminder)
+  - **download / like milestones** — when your models pass a round total
+    (250s early on, 1,000s in the thousands, 5,000s past 10k…)
 
 The pill/popup and the notifier are one plugin; you can mount just the service
 (no bar widget) if you only want notifications.
@@ -119,6 +121,7 @@ Both accept booleans and `"on"`/`"off"`.
 | `openOnClick` | `on` | clicking a notification runs `xdg-open` on the model/message URL |
 | `showPoints` | `on` | show the point balance in the bar pill |
 | `boostExpiryWarnDays` | `5` | warn this many days before a boost token expires (`0` = off; needs `points` in `notifyTypes` and a token in hand) |
+| `notifyMilestones` | `on` | notify when your models pass a round download / like total |
 | `debug` | `off` | log raw API responses to the shell log to help adjust parsers |
 
 ## How it works
@@ -128,14 +131,15 @@ Both accept booleans and `"on"`/`"off"`.
   so enabling the plugin doesn't replay your existing unread backlog. Notified
   message IDs live in a bounded ring buffer in `PersistentProperties` so a
   shell reload doesn't re-notify. Publishes `points`, `followerCount`,
-  `boostTokens`, `unreadByType`, `unreadTotal`, `profileName`, `connState` for
-  the pill/popup.
+  `boostTokens`, `totalDownloads`, `totalLikes`, `unreadByType`, `unreadTotal`,
+  `profileName`, `connState` for the pill/popup.
 - Two poll loops: the fast one checks `/message/count`, and on a change pages
   only the affected notification category (comments / model activity / system
   / community — never print jobs). The slower one reads `/my/profile` for the
-  point balance, follower count (a rise → "N new followers"), and boost-token
-  count; when you hold a token it also scans system messages for MakerWorld's
-  own expiry reminder and warns once per token.
+  point balance, follower count (a rise → "N new followers"), boost-token
+  count, and lifetime download / like totals (a crossed round number → a
+  milestone notification); when you hold a token it also scans system messages
+  for MakerWorld's own expiry reminder and warns once per token.
 - `BarWidget.qml` / `Panel.qml` — the pill and its popup. The popup makes its
   own per-category `/my/messages` fetch for the activity list (when opened,
   then every 2 min while open); the service owns polling and notifications.

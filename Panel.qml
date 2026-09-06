@@ -34,6 +34,8 @@ Panel {
   readonly property real points: svc ? svc.points : -1
   readonly property int followerCount: svc ? svc.followerCount : -1
   readonly property int boostTokens: svc ? svc.boostTokens : -1
+  readonly property int totalDownloads: svc ? svc.totalDownloads : -1
+  readonly property int totalLikes: svc ? svc.totalLikes : -1
   readonly property var unreadByType: svc ? svc.unreadByType : ({})
   readonly property int unreadTotal: svc ? svc.unreadTotal : 0
   readonly property string connState: svc ? String(svc.connState || "init") : "init"
@@ -73,6 +75,10 @@ Panel {
       out.push(pl)
     }
     if (followerCount >= 0) out.push("Followers: " + Model.groupNum(followerCount))
+    if (totalDownloads >= 0) {
+      out.push("Downloads: " + Model.groupNum(totalDownloads)
+        + (totalLikes >= 0 ? "   Likes: " + Model.groupNum(totalLikes) : ""))
+    }
     var chips = Model.unreadChips(unreadByType)
     if (chips.length) {
       var bits = chips.map(function (c) { return c.count + " " + c.label })
@@ -390,10 +396,11 @@ Panel {
               }
             }
             Item { width: Style.space(4); height: 1 }
-            // boost tokens + follower count, when known
+            // boost tokens, followers, lifetime downloads / likes
             Column {
               anchors.verticalCenter: parent.verticalCenter
-              visible: root.boostTokens > 0 || root.followerCount >= 0
+              spacing: Style.space(1)
+              visible: root.boostTokens > 0 || root.followerCount >= 0 || root.totalDownloads >= 0
               Text {
                 visible: root.boostTokens > 0
                 text: String.fromCharCode(0xf0e7) + "  " + root.boostTokens
@@ -405,6 +412,14 @@ Panel {
               Text {
                 visible: root.followerCount >= 0
                 text: Model.glyphFor("follow") + "  " + Model.groupNum(root.followerCount) + " followers"
+                color: root.dim
+                font.family: root.mono
+                font.pixelSize: Style.font.caption
+              }
+              Text {
+                visible: root.totalDownloads >= 0
+                text: Model.STAT_GLYPH["downloads"] + "  " + Model.groupNum(root.totalDownloads) + " downloads"
+                  + (root.totalLikes >= 0 ? "    " + Model.STAT_GLYPH["likes"] + "  " + Model.groupNum(root.totalLikes) : "")
                 color: root.dim
                 font.family: root.mono
                 font.pixelSize: Style.font.caption
