@@ -1,65 +1,60 @@
 import QtQuick
 
-// The MakerWorld "stacked cubes" mark, painted in one colour so it takes the
-// bar's foreground tint. Three isometric cubes: two side by side, one resting
-// on top. Faces are alpha-shaded (not a darker colour) so it reads on light
-// and dark bars alike.
-Canvas {
+// The MakerWorld "stacked cubes" mark: three isometric cubes - two in front,
+// one resting on top - drawn as a small inline SVG so it stays crisp at bar
+// size. Each cube shows a bright top face and two dimmer side faces (opacity
+// steps of `color`), so adjacent cubes read as separate blocks and the whole
+// thing tints with the bar foreground on light and dark themes alike.
+Image {
   id: root
 
-  property color color: "#e0e0e0"
+  property color color: "#e6e6e6"
 
-  antialiasing: true
-  renderStrategy: Canvas.Cooperative
-  renderTarget: Canvas.Image
+  fillMode: Image.PreserveAspectFit
+  smooth: true
+  sourceSize.width: width > 0 ? Math.round(width * 2) : 40
+  sourceSize.height: height > 0 ? Math.round(height * 2) : 40
+  source: _svg(String(color))
 
-  onColorChanged: requestPaint()
-  onWidthChanged: requestPaint()
-  onHeightChanged: requestPaint()
+  function _svg(col) {
+    var u = 26, ex = u * 0.866, ey = u * 0.5
+    var W = 100, H = 100
 
-  function _poly(ctx, pts) {
-    ctx.beginPath()
-    ctx.moveTo(pts[0][0], pts[0][1])
-    for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1])
-    ctx.closePath()
-    ctx.fill()
-  }
+    // Cube cells as [col, row, height] on an isometric grid; two on the
+    // ground (front-right, front-left) and one stacked on top.
+    var cells = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 
-  // One cube from its top vertex (tx,ty), edge length s.
-  function _cube(ctx, tx, ty, s) {
-    var ex = s * 0.866, ey = s * 0.5, dy = s
-    var T = [tx, ty]
-    var A = [tx + ex, ty + ey]
-    var B = [tx - ex, ty + ey]
-    var C = [tx, ty + 2 * ey]
-    var Td = [tx, ty + dy]
-    var Ad = [tx + ex, ty + ey + dy]
-    var Bd = [tx - ex, ty + ey + dy]
-
-    ctx.globalAlpha = 1.0;  _poly(ctx, [T, A, C, B])     // top
-    ctx.globalAlpha = 0.70; _poly(ctx, [T, A, Ad, Td])   // right
-    ctx.globalAlpha = 0.44; _poly(ctx, [T, B, Bd, Td])   // left
-    ctx.globalAlpha = 1.0
-  }
-
-  onPaint: {
-    var ctx = getContext("2d")
-    ctx.reset()
-    ctx.fillStyle = root.color
-
-    var W = width, H = height
-    var pad = Math.max(1, Math.min(W, H) * 0.08)
-
-    // Cluster bounding box is 4*ex wide (= 3.464 s) and 2 s tall. Fit both.
-    var s = Math.min((W - 2 * pad) / 3.464, (H - 2 * pad) / 2.0)
-    var ex = s * 0.866, ey = s * 0.5, dy = s
+    // Painter's order: lower first, then back-to-front.
+    cells.sort(function (p, q) {
+      return (p[2] - q[2]) || ((q[0] + q[1]) - (p[0] + p[1])) || (q[0] - p[0])
+    })
 
     var cx = W / 2
-    var topY = (H - 2 * s) / 2
+    var baseY = 44
 
-    // front-left, front-right, then the top cube last so it overlaps cleanly
-    _cube(ctx, cx - ex, topY + dy - ey, s)
-    _cube(ctx, cx + ex, topY + dy - ey, s)
-    _cube(ctx, cx, topY, s)
+    function f(x, y) { return x.toFixed(1) + "," + y.toFixed(1) }
+    function face(pts, opacity) {
+      var d = pts.map(function (p) { return f(p[0], p[1]) }).join(" ")
+      return '<polygon points="' + d + '" fill="' + col + '" fill-opacity="' + opacity
+        + '" stroke="' + col + '" stroke-opacity="0.35" stroke-width="1"'
+        + ' stroke-linejoin="round"/>'
+    }
+
+    var body = ""
+    for (var i = 0; i < cells.length; i++) {
+      var c = cells[i][0], r = cells[i][1], h = cells[i][2]
+      var tx = cx + (c - r) * ex
+      var ty = baseY + (c + r) * ey - h * u
+      var T = [tx, ty]
+      var A = [tx + ex, ty + ey], B = [tx - ex, ty + ey], C = [tx, ty + 2 * ey]
+      var Td = [tx, ty + u], Ad = [tx + ex, ty + ey + u], Bd = [tx - ex, ty + ey + u]
+      body += face([T, A, C, B], "1")        // top face
+      body += face([T, A, Ad, Td], "0.55")   // right face
+      body += face([T, B, Bd, Td], "0.28")   // left face
+    }
+
+    return "data:image/svg+xml;utf8," + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W + ' ' + H + '">'
+      + body + '</svg>')
   }
 }
