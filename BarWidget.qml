@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "Model.js" as Model
 
 // Bar pill for MakerWorld. Shows the point balance and an unread badge; the
 // popup (Panel.qml, loaded lazily) holds the activity list and owns its own
@@ -80,7 +81,16 @@ BarWidget {
   // WidgetButton owns click routing, tooltip, and the bar's reveal wiring; its
   // own centred label is switched off and we lay out our own Row instead.
   readonly property bool expired: root.svc && root.svc.connState === "expired"
-  readonly property string pillText: panelLoader.item ? String(panelLoader.item.pillText || "") : ""
+  readonly property bool hasNew: root.svc ? root.svc.hasNew === true : false
+  readonly property int newUnread: root.svc ? (root.svc.newUnread || 0) : 0
+  readonly property real pointsDelta: root.svc ? (root.svc.pointsDelta || 0) : 0
+  readonly property int unreadTotal: root.svc ? (root.svc.unreadTotal || 0) : 0
+  readonly property real points: root.svc ? root.svc.points : -1
+  readonly property bool showPoints: (root.svc && root.svc.cfg) ? (root.svc.cfg.showPoints !== false) : true
+
+  readonly property string pointsText: (showPoints && points >= 0)
+    ? (Model.groupNum(points) + (pointsDelta > 0 ? " " + String.fromCharCode(0x25b2) : ""))
+    : ""
 
   WidgetButton {
     id: button
@@ -90,6 +100,9 @@ BarWidget {
     hasVisualContent: true
     tooltipText: panelLoader.item ? panelLoader.item.tooltip : ""
     fixedWidth: pillRow.implicitWidth + Style.spaceReal(17)
+
+    readonly property color accent: root.bar ? Color.accent : "#8ab4f8"
+    readonly property color dim: Qt.darker(button.foreground, 1.7)
 
     onPressed: function (b) {
       if (!root.bar) return
@@ -109,15 +122,40 @@ BarWidget {
         readonly property int side: Math.max(12, Math.round((root.bar ? root.bar.barSize : 30) * 0.6))
         width: side
         height: side
-        color: button.foreground
+        color: root.expired ? button.foreground
+          : (root.hasNew ? button.accent : button.foreground)
         opacity: root.expired ? 0.45 : 1
       }
 
+      // Point balance (+ a ▲ when it rose since you last opened the popup)
       Text {
         anchors.verticalCenter: parent.verticalCenter
-        visible: root.expired || root.pillText !== ""
-        text: (root.expired ? String.fromCharCode(0xf071) + "  " : "") + root.pillText
-        color: root.expired && root.bar ? root.bar.urgent : button.foreground
+        visible: !root.expired && root.pointsText !== ""
+        text: root.pointsText
+        color: root.hasNew ? button.accent : button.foreground
+        font.family: button.fontFamily
+        font.pixelSize: button.fontSize
+        renderType: Text.NativeRendering
+      }
+
+      // Unread badge: filled dot + count. Accent while any of it is new,
+      // dim once you've opened the popup on it.
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        visible: !root.expired && root.unreadTotal > 0
+        text: String.fromCharCode(0x25cf) + root.unreadTotal
+        color: root.newUnread > 0 ? button.accent : button.dim
+        font.family: button.fontFamily
+        font.pixelSize: button.fontSize
+        renderType: Text.NativeRendering
+      }
+
+      // Sign-in lapsed
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        visible: root.expired
+        text: String.fromCharCode(0xf071)
+        color: root.bar ? root.bar.urgent : "#e06c75"
         font.family: button.fontFamily
         font.pixelSize: button.fontSize
         renderType: Text.NativeRendering

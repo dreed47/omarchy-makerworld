@@ -138,6 +138,26 @@ Item {
   // "init" | "ok" | "expired" | "notoken"
   property string connState: "init"
 
+  // Set by the popup while it is open, so a poll that lands during that time
+  // is treated as already seen (no "new" highlight for what you're looking at).
+  property bool panelOpen: false
+
+  // ---- "New since you last opened the popup" --------------------
+  //
+  // Separate baseline from the notification diff: `seen*` is cleared by
+  // opening the popup, not by a poll, so the bar pill reflects your attention
+  // rather than MakerWorld's server read-state.
+  readonly property int newUnread: Model.riseOver(unreadTotal, state.seenUnread)
+  readonly property real pointsDelta: Model.riseOver(points, state.seenPoints)
+  readonly property int newFollowers: Model.riseOver(followerCount, state.seenFans)
+  readonly property bool hasNew: newUnread > 0 || pointsDelta > 0 || newFollowers > 0
+
+  function markSeen() {
+    if (unreadTotal >= 0) state.seenUnread = unreadTotal
+    if (points >= 0) state.seenPoints = points
+    if (followerCount >= 0) state.seenFans = followerCount
+  }
+
   // ---- Persisted state (survives a shell reload) -------------------
   PersistentProperties {
     id: state
@@ -151,6 +171,9 @@ Item {
     property double lastDownloads: -1
     property double lastLikes: -1
     property string boostWarnedId: ""    // boostingRightId we've already warned about
+    property double seenUnread: -1       // pill "new" baseline (cleared on popup open)
+    property double seenPoints: -1
+    property double seenFans: -1
     property bool baselined: false
   }
 
@@ -221,6 +244,11 @@ Item {
     root.apiUnreadTotal = parsed.apiUnreadTotal
     root.connState = "ok"
     root.refreshFailedNotified = false
+
+    // Pill "new" baseline: seed on first sight, follow the count down (things
+    // read elsewhere), and stay glued to it while the popup is open.
+    if (state.seenUnread < 0 || root.unreadTotal < state.seenUnread || root.panelOpen)
+      state.seenUnread = root.unreadTotal
 
     if (!state.baselined) {
       state.lastCountsJson = JSON.stringify(parsed.byType)
@@ -334,6 +362,7 @@ Item {
           Model.siteBase(root.region) + "/en/my/points")
       }
       state.lastPoints = pts
+      if (state.seenPoints < 0 || pts < state.seenPoints || root.panelOpen) state.seenPoints = pts
     }
 
     // ---- Follower alerts (diff fanCount) ----
@@ -349,6 +378,7 @@ Item {
           Model.followersUrl(root.region, root.profileHandle))
       }
       state.lastFanCount = fans
+      if (state.seenFans < 0 || fans < state.seenFans || root.panelOpen) state.seenFans = fans
     }
 
     // ---- Boost tokens: count change + expiry warning ----
@@ -563,6 +593,11 @@ Item {
         boostTokens: root.boostTokens,
         totalDownloads: root.totalDownloads,
         totalLikes: root.totalLikes,
+        hasNew: root.hasNew,
+        newUnread: root.newUnread,
+        pointsDelta: root.pointsDelta,
+        newFollowers: root.newFollowers,
+        panelOpen: root.panelOpen,
         profileName: root.profileName,
         profileHandle: root.profileHandle,
         boostWarnedId: state.boostWarnedId,

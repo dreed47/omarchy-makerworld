@@ -5,8 +5,12 @@ bar and as desktop notifications — new comments and replies, likes, new
 followers, system messages, design boosts, point changes, and boost-token
 expiry.
 
-- **Bar pill** — the MakerWorld cube mark, your point balance, and an unread
-  badge; a warning triangle if the sign-in lapses.
+- **Bar pill** — the MakerWorld cube mark, your point balance, and a filled
+  unread badge. When something has arrived **since you last opened the popup**
+  — new notifications, points up, or new followers — the mark and number turn
+  your theme accent colour and a `▲` appears next to the balance; opening the
+  popup clears the highlight (independent of MakerWorld's own read state). A
+  warning triangle shows if the sign-in lapses.
 - **Popup** — point balance, boost-token / follower / download / like counts,
   and two tabs:
   - **Activity** — unread-by-category chips, recent comments/replies/likes/etc.

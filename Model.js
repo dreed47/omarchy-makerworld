@@ -846,6 +846,14 @@ function unreadTotalOf(byType) {
   return t;
 }
 
+// How much `cur` has risen above `seen`, or 0. `seen < 0` means "no baseline
+// yet" -> 0 (nothing counts as new until the first snapshot).
+function riseOver(cur, seen) {
+  if (cur === undefined || cur === null || cur < 0) return 0;
+  if (seen === undefined || seen === null || seen < 0) return 0;
+  return cur > seen ? (cur - seen) : 0;
+}
+
 // Categories with a non-zero unread count, in canonical order, with a glyph
 // and a human label. For the popup's chip row.
 var CLASS_LABEL = {
@@ -966,6 +974,7 @@ if (typeof module !== "undefined") {
     isoDate: isoDate,
     groupNum: groupNum,
     unreadTotalOf: unreadTotalOf,
+    riseOver: riseOver,
     unreadChips: unreadChips,
     relTime: relTime,
     splitHttp: splitHttp

@@ -93,6 +93,15 @@ test("normalizedConfig reads bar-schema on/off strings", () => {
   assert.equal(M.normalizedConfig(null).showPoints, true, "default on");
 });
 
+test("riseOver: how far cur is above a seen baseline", () => {
+  assert.equal(M.riseOver(7, 5), 2, "rose by 2");
+  assert.equal(M.riseOver(5, 5), 0, "no change");
+  assert.equal(M.riseOver(3, 5), 0, "went down -> not new");
+  assert.equal(M.riseOver(9, -1), 0, "no baseline yet -> nothing is new");
+  assert.equal(M.riseOver(-1, 5), 0, "no current value");
+  assert.equal(M.riseOver(1200, 1000), 200);
+});
+
 test("groupNum / unreadTotalOf / unreadChips", () => {
   assert.equal(M.groupNum(1240), "1,240");
   assert.equal(M.groupNum(5), "5");

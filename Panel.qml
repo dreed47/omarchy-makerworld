@@ -57,11 +57,21 @@ Panel {
     return parts.join("  ")
   }
   readonly property string label: pillText  // back-compat alias
+
+  readonly property int newUnread: svc ? (svc.newUnread || 0) : 0
+  readonly property real pointsDelta: svc ? (svc.pointsDelta || 0) : 0
+  readonly property int newFollowers: svc ? (svc.newFollowers || 0) : 0
+
   readonly property string tooltip: {
     if (connState === "notoken") return "MakerWorld — run makerworld-login to sign in"
     if (connState === "expired") return "MakerWorld — sign-in expired, run makerworld-login"
     var who = profileName !== "" ? profileName : "MakerWorld"
-    return unreadTotal > 0 ? (who + " — " + unreadTotal + " unread") : who
+    var bits = []
+    var chips = Model.unreadChips(unreadByType)
+    for (var i = 0; i < chips.length; i++) bits.push(chips[i].count + " " + chips[i].label)
+    if (pointsDelta > 0) bits.push("+" + Model.groupNum(pointsDelta) + " pts")
+    if (newFollowers > 0) bits.push(newFollowers + (newFollowers === 1 ? " new follower" : " new followers"))
+    return bits.length ? (who + " — " + bits.join(", ")) : who
   }
 
   // Right-click desktop notification (BarWidget.notify()).
@@ -254,6 +264,25 @@ Panel {
     root.controller.hide()
   }
   function toggle() { root.opened ? root.close() : root.openFromHotkey() }
+
+  // Tell the service the popup is open so it treats anything that lands now as
+  // already seen, and clear the "new" markers on open (again a moment later,
+  // once the on-open fetch has resolved).
+  onOpenedChanged: {
+    if (!svc) return
+    svc.panelOpen = root.opened
+    if (root.opened && svc.markSeen) {
+      svc.markSeen()
+      Qt.callLater(function () { if (root.opened && svc.markSeen) svc.markSeen() })
+    }
+  }
+  Timer {
+    interval: 2500
+    running: root.opened
+    repeat: true
+    onTriggered: { if (svc && svc.markSeen) svc.markSeen() }
+  }
+
   function switchPanel(direction) {
     if (root.bar && typeof root.bar.switchPanelFrom === "function")
       return root.bar.switchPanelFrom(root.barIdentity, direction)

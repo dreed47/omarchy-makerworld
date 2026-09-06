@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **"Something new" pill state** — the bar pill tracks what you'd seen the last
+  time the popup was open (separate from MakerWorld's server read-state). When
+  unread notifications, point balance, or follower count have risen since then,
+  the cube mark + number turn the theme accent colour, the unread badge is a
+  filled dot, and a `▲` shows next to the points. Opening the popup clears it;
+  the hover tooltip breaks down what's new. Nothing needs marking read on the
+  MakerWorld site.
+
 - **"My models" popup tab** — lists your published designs from
   `/v1/design-service/my/design/published` with per-model downloads, likes,
   prints and comment counts; sort by downloads / likes / prints; click a row
