@@ -113,10 +113,10 @@ Both accept booleans and `"on"`/`"off"`.
 ### Manual poke (testing)
 
 ```sh
-qs -c omarchy ipc call makerworld status    # dump service state as JSON
-qs -c omarchy ipc call makerworld refresh   # poll now, keep the baseline
-qs -c omarchy ipc call makerworld poll      # re-baseline then poll now
-qs -c omarchy ipc call makerworld markRead  # mark all messages read
+qs -p /usr/share/omarchy/shell ipc call makerworld status    # dump service state as JSON
+qs -p /usr/share/omarchy/shell ipc call makerworld refresh   # poll now, keep the baseline
+qs -p /usr/share/omarchy/shell ipc call makerworld poll      # re-baseline then poll now
+qs -p /usr/share/omarchy/shell ipc call makerworld markRead  # mark all messages read
 ```
 
 ## Development
