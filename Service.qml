@@ -223,17 +223,25 @@ Item {
     state.lastTotal = root.unreadTotal
 
     if (!root.cfg.notify) return
-    var relevant = false
-    for (var i = 0; i < up.length; i++)
-      if (root.notifyTypes.indexOf(up[i]) !== -1) { relevant = true; break }
-    if (relevant) root.fetchMessages()
+    // Page only the notification categories whose class actually went up and
+    // is enabled. `up` classes map to the app's `type=` category params.
+    var params = {}
+    for (var i = 0; i < up.length; i++) {
+      if (root.notifyTypes.indexOf(up[i]) === -1) continue
+      params[Model.categoryParamForClass(up[i])] = true
+    }
+    var q = []
+    for (var k in params) q.push(parseInt(k, 10))
+    if (q.length) { root.fetchQueue = q; root.pumpFetch() }
   }
 
   // ---- Poll: recent message list (for notification text) ---------
-  function fetchMessages() {
-    if (messagesProc.running) return
+  property var fetchQueue: []
+  function pumpFetch() {
+    if (messagesProc.running || root.fetchQueue.length === 0) return
+    var cat = root.fetchQueue.shift()
     var limit = Math.max(10, (root.cfg.maxBurst || 5) * 3)
-    messagesProc.command = curlArgs(Model.urlMessages(root.region, limit, 0))
+    messagesProc.command = curlArgs(Model.urlMessages(root.region, limit, 0, cat))
     messagesProc.running = true
   }
 
@@ -244,13 +252,15 @@ Item {
       onStreamFinished: {
         var r = Model.splitHttp(text)
         if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }
-        if (r.status < 200 || r.status >= 300 || r.body === "") return
-        try {
-          var json = JSON.parse(r.body)
-          root.dbg("messages", r.body)
-          if (Model.isAuthError(json)) { root.onAuthFail(); return }
-          root.handleMessages(json)
-        } catch (e) { root.dbg("messages parse error", e) }
+        if (r.status >= 200 && r.status < 300 && r.body !== "") {
+          try {
+            var json = JSON.parse(r.body)
+            root.dbg("messages", r.body)
+            if (Model.isAuthError(json)) { root.onAuthFail(); return }
+            root.handleMessages(json)
+          } catch (e) { root.dbg("messages parse error", e) }
+        }
+        Qt.callLater(root.pumpFetch)   // next queued category, if any
       }
     }
   }

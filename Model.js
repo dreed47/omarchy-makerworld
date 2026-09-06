@@ -46,18 +46,43 @@ function urlMessageCount(region) {
   return apiBase(region) + PATHS.messageCount;
 }
 
-function urlMessages(region, limit, offset) {
+// `category` is the `type=` query param the app uses to page one tab of the
+// notification centre: 1 comments/ratings, 2 model activity (boosts, publish),
+// 3 system + boost tokens, 4/6 print jobs, 5 community. Omitted = print jobs.
+function urlMessages(region, limit, offset, category) {
   var q = "?limit=" + encodeURIComponent(String(limit || 20))
     + "&offset=" + encodeURIComponent(String(offset || 0));
+  if (category !== undefined && category !== null && category !== "")
+    q += "&type=" + encodeURIComponent(String(category));
   return apiBase(region) + PATHS.messages + q;
+}
+
+// The notification categories worth pulling for social activity, and which of
+// our classes each can contain. Print jobs (category 4/6) are deliberately not
+// here.
+var MESSAGE_CATEGORIES = [
+  { param: 1, classes: ["comment", "reply"] },
+  { param: 2, classes: ["points", "system"] },
+  { param: 3, classes: ["system", "points"] },
+  { param: 5, classes: ["like"] }
+];
+
+// Which single category to page when a given class's unread count went up.
+function categoryParamForClass(cls) {
+  if (cls === "comment" || cls === "reply") return 1;
+  if (cls === "like") return 5;
+  if (cls === "points") return 2;
+  return 3; // system, follow, anything else
 }
 
 function urlProfile(region) {
   return apiBase(region) + PATHS.profile;
 }
 
+// The site's notification centre - the fallback target for a message with no
+// specific design/model to open.
 function messagesPageUrl(region) {
-  return siteBase(region) + "/en/my/messages";
+  return siteBase(region) + "/en/my/notification";
 }
 
 function modelUrl(region, id, locale) {
@@ -372,19 +397,84 @@ function messageId(m) {
   return String(messageTs(m)) + ":" + stripHtml(firstDefined(m, ["content", "text", "title", "body"]) || "").slice(0, 40);
 }
 
-// Classify a raw message into one of KNOWN_TYPES (+ "other").
-function classifyMessage(m) {
-  var hay = [
-    firstDefined(m, ["type", "bizType", "category", "msgType", "messageType", "subType", "action", "event", "templateCode"]),
-    firstDefined(m, ["title", "content", "text", "body", "summary"])
-  ].map(function (x) { return String(x || "").toLowerCase(); }).join(" ");
+// The one payload object on a message envelope (everything else is metadata).
+// e.g. { id, type, from, isread, createTime, designCommented: {...} } -> designCommented
+var MSG_ENVELOPE = {
+  id: 1, type: 1, from: 1, isread: 1, isRead: 1,
+  createTime: 1, createdAt: 1, ctime: 1, updateTime: 1
+};
+function payloadOf(m) {
+  if (!m || typeof m !== "object") return { key: "", val: {} };
+  for (var k in m) {
+    if (MSG_ENVELOPE[k]) continue;
+    if (m[k] && typeof m[k] === "object") return { key: k, val: m[k] };
+  }
+  return { key: "", val: {} };
+}
 
+// Recursively find the first design reference under a payload.
+function digDesign(obj, depth) {
+  if (!obj || typeof obj !== "object" || (depth || 0) > 5) return null;
+  if (obj.designInfo && obj.designInfo.id && +obj.designInfo.id > 0) {
+    return { id: String(obj.designInfo.id), title: String(obj.designInfo.title || "") };
+  }
+  if (obj.designId && /^\d+$/.test(String(obj.designId)) && +obj.designId > 0) {
+    return { id: String(obj.designId), title: String(obj.designTitle || obj.designName || "") };
+  }
+  for (var k in obj) {
+    if (obj[k] && typeof obj[k] === "object") {
+      var r = digDesign(obj[k], (depth || 0) + 1);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+// Recursively find the first non-empty string value for any of `names`.
+function deepFindStr(obj, names, depth) {
+  if (!obj || typeof obj !== "object" || (depth || 0) > 5) return "";
+  for (var i = 0; i < names.length; i++) {
+    var v = obj[names[i]];
+    if (typeof v === "string" && v.trim() !== "") return v;
+  }
+  for (var k in obj) {
+    if (obj[k] && typeof obj[k] === "object") {
+      var r = deepFindStr(obj[k], names, (depth || 0) + 1);
+      if (r) return r;
+    }
+  }
+  return "";
+}
+
+// Inner numeric event `type` -> our class. Derived from live payloads; unknown
+// codes fall through to a name/text guess.
+var EVENT_CLASS = {
+  6: "print",
+  101: "system", 102: "system", 103: "system",          // designPublished etc.
+  201: "comment", 251: "comment",                        // designCommented / instRating
+  202: "reply", 203: "reply", 252: "reply",              // commentReplied / ratingReplied
+  254: "other",                                          // instanceRatingRemind (a nag - hide by default)
+  301: "follow", 302: "follow", 303: "follow",           // (new follower - unconfirmed)
+  401: "system", 402: "system", 411: "system", 412: "system",
+  501: "points", 502: "points", 503: "points",           // boost token / design boosted
+  601: "like", 602: "like", 603: "like"                  // community liked
+};
+
+// Classify a raw message (envelope with a nested payload) into a KNOWN_TYPE
+// (+ "print"/"other").
+function classifyMessage(m) {
+  var inner = parseInt(m && m.type, 10);
+  if (!isNaN(inner) && EVENT_CLASS[inner]) return EVENT_CLASS[inner];
+
+  var p = payloadOf(m);
+  var hay = (p.key + " " + deepFindStr(p.val, ["title", "content", "detail"])).toLowerCase();
   if (/repl(y|ies|ied)/.test(hay)) return "reply";
   if (/comment|rating|review/.test(hay)) return "comment";
+  if (/boost|\bpoint|credit|payout|reward/.test(hay)) return "points";
   if (/like|favou?rit|praise|heart/.test(hay)) return "like";
   if (/follow|\bfans?\b|subscrib/.test(hay)) return "follow";
-  if (/point|credit|boost.?token|payout|reward/.test(hay)) return "points";
-  if (/system|official|announc|notice|policy/.test(hay)) return "system";
+  if (/task|print/.test(hay)) return "print";
+  if (/system|official|announc|notice|policy|publish/.test(hay)) return "system";
   return "other";
 }
 
@@ -396,6 +486,7 @@ var CLASS_TITLE = {
   follow: "New follower",
   system: "MakerWorld",
   points: "MakerWorld points",
+  print: "Print job",
   other: "MakerWorld"
 };
 
@@ -407,6 +498,7 @@ var CLASS_GLYPH = {
   follow: String.fromCharCode(0xf234),  // nf-fa-user_plus
   system: String.fromCharCode(0xf0f3),  // nf-fa-bell
   points: String.fromCharCode(0xf51e),  // nf-fa-coins
+  print: String.fromCharCode(0xf02f),   // nf-fa-print
   other: String.fromCharCode(0xf0f3)
 };
 
@@ -414,35 +506,91 @@ function glyphFor(cls) {
   return CLASS_GLYPH[cls] || CLASS_GLYPH.other;
 }
 
-// formatMessage(m, region) -> { id, ts, cls, title, body, url }
+// formatMessage(m, region) -> { id, ts, cls, title, body, url, read }
+//
+// `m` is a notification envelope: { id, type, from, isread, createTime, <one
+// payload object> }. The payload key names the event (designCommented,
+// instRating, pointDesignBoosted, systemForWeb, communityPostLiked, …); its
+// shape varies, so design/actor/text are dug out recursively.
 function formatMessage(m, region) {
   var cls = classifyMessage(m);
-  var actor = firstDefined(m, ["senderName", "fromUserName", "fromName", "userName", "nickName", "nickname", "authorName", "creatorName"]);
-  var subject = firstDefined(m, ["designTitle", "modelTitle", "subjectName", "designName", "targetTitle", "resourceName"]);
-  var text = stripHtml(firstDefined(m, ["content", "text", "body", "message", "summary", "title"]) || "");
+  var p = payloadOf(m);
+  var pv = p.val || {};
+  var from = (m && m.from && typeof m.from === "object") ? m.from : null;
+
+  var design = digDesign(pv, 0);
+  var designTitle = design ? design.title : "";
+
+  var actor = from && from.name ? String(from.name) : "";
+  if (!actor) actor = deepFindStr(pv, ["boostedByUsername", "boostedByUserName", "name", "userName", "nickName", "nickname"]);
+  if (!actor && Array.isArray(pv.users) && pv.users[0] && pv.users[0].name) actor = String(pv.users[0].name);
+
+  var text;
+  if (p.key === "instanceRatingRemind") {
+    text = "Rate the model you printed" + (designTitle ? ": “" + designTitle + "”" : "");
+  } else if (p.key === "designPublished") {
+    text = "Your design is now live" + (designTitle ? ": “" + designTitle + "”" : "");
+  } else if (cls === "system") {
+    var st = deepFindStr(pv, ["title"]);
+    var sb = deepFindStr(pv, ["bio"]);
+    text = st + ((sb && sb !== st) ? " — " + sb : "");
+    if (!text) text = stripHtml(deepFindStr(pv, ["content", "newContent", "detail"]));
+  } else if (p.key === "pointDesignBoosted") {
+    var cnt = pv.designBoostCnt;
+    text = (actor ? actor + " boosted" : "Boost received")
+      + (designTitle ? " “" + designTitle + "”" : "")
+      + (cnt ? " (" + cnt + " total)" : "");
+  } else if (p.key === "pointBoostingRightGet") {
+    text = "You received a boost token";
+  } else if (cls === "reply") {
+    // Prefer the newest reply body over the original comment it answers.
+    text = stripHtml(
+      deepFindStr(pv.commentReply || {}, ["content"])
+      || deepFindStr(pv.commentAtReply || {}, ["content"])
+      || deepFindStr(pv, ["content", "newContent", "detail"]));
+  } else {
+    text = stripHtml(deepFindStr(pv, ["content", "newContent", "detail"]));
+  }
 
   var body = "";
-  if (actor) body += String(actor);
-  if (subject) body += (body ? " on " : "") + "“" + String(subject) + "”";
+  if (cls !== "system" && p.key !== "pointDesignBoosted" && actor) body += actor;
+  if (cls !== "system" && p.key !== "pointDesignBoosted" && designTitle) {
+    body += (body ? " on " : "") + "“" + designTitle + "”";
+  }
   if (text) body += (body ? ": " : "") + text;
-  if (body.length > 220) body = body.slice(0, 217) + "…";
-
-  var designId = firstDefined(m, ["designId", "modelId", "designID", "resourceId", "targetId"]);
-  var link = firstDefined(m, ["url", "link", "jumpUrl", "redirectUrl", "targetUrl"]);
-  var url;
-  if (designId !== undefined && /^\d+$/.test(String(designId))) url = modelUrl(region, designId);
-  else if (link && /^https?:\/\//.test(String(link))) url = String(link);
-  else if (link && String(link).charAt(0) === "/") url = siteBase(region) + String(link);
-  else url = messagesPageUrl(region);
+  body = stripHtml(body);
+  if (body.length > 240) body = body.slice(0, 237) + "…";
 
   return {
     id: messageId(m),
     ts: messageTs(m),
     cls: cls,
     title: CLASS_TITLE[cls] || CLASS_TITLE.other,
-    body: body || "New activity on MakerWorld",
-    url: url
+    body: body || (CLASS_TITLE[cls] || "New activity on MakerWorld"),
+    url: design ? modelUrl(region, design.id) : messagesPageUrl(region),
+    read: !!(m && (m.isread || m.isRead))
   };
+}
+
+// Merge + sort formatted messages from several category fetches, newest first,
+// optionally dropping print jobs / unclassified noise.
+function mergeMessageLists(lists, region, opts) {
+  var o = opts || {};
+  var seen = {};
+  var out = [];
+  for (var i = 0; i < (lists || []).length; i++) {
+    var arr = lists[i] || [];
+    for (var j = 0; j < arr.length; j++) {
+      var f = (arr[j] && arr[j].cls !== undefined) ? arr[j] : formatMessage(arr[j], region);
+      if (o.dropPrint && (f.cls === "print" || f.cls === "other")) continue;
+      if (seen[f.id]) continue;
+      seen[f.id] = true;
+      out.push(f);
+    }
+  }
+  out.sort(function (a, b) { return b.ts - a.ts; });
+  if (o.limit && out.length > o.limit) out = out.slice(0, o.limit);
+  return out;
 }
 
 // Given raw messages + the set of already-notified ids + allowed classes,
@@ -571,6 +719,8 @@ if (typeof module !== "undefined") {
     PATHS: PATHS,
     urlMessageCount: urlMessageCount,
     urlMessages: urlMessages,
+    MESSAGE_CATEGORIES: MESSAGE_CATEGORIES,
+    categoryParamForClass: categoryParamForClass,
     urlProfile: urlProfile,
     messagesPageUrl: messagesPageUrl,
     modelUrl: modelUrl,
@@ -593,8 +743,10 @@ if (typeof module !== "undefined") {
     messageTs: messageTs,
     messageId: messageId,
     classifyMessage: classifyMessage,
+    payloadOf: payloadOf,
     glyphFor: glyphFor,
     formatMessage: formatMessage,
+    mergeMessageLists: mergeMessageLists,
     selectFresh: selectFresh,
     mergeSeen: mergeSeen,
     parsePoints: parsePoints,

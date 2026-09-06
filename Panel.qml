@@ -78,16 +78,37 @@ Panel {
   property bool loading: false
   property string listError: ""
 
+  // Recent activity is pulled one notification category at a time (comments,
+  // model activity, system, community - not print jobs) and merged newest-first.
+  property var catQueue: []
+  property var catResults: []
+
   function refresh() {
     if (svc) { if (svc.pollCounts) svc.pollCounts(); if (svc.pollProfile) svc.pollProfile() }
-    if (accessToken === "" || listProc.running) return
+    if (accessToken === "" || listProc.running || root.catQueue.length > 0) return
     root.loading = true
+    root.catResults = []
+    var q = []
+    for (var i = 0; i < Model.MESSAGE_CATEGORIES.length; i++) q.push(Model.MESSAGE_CATEGORIES[i].param)
+    root.catQueue = q
+    pumpList()
+  }
+
+  function pumpList() {
+    if (listProc.running) return
+    if (root.catQueue.length === 0) {
+      root.messages = Model.mergeMessageLists(root.catResults, root.region, { dropPrint: true, limit: 30 })
+      root.loading = false
+      if (root.messages.length > 0) root.listError = ""
+      return
+    }
+    var cat = root.catQueue.shift()
     listProc.command = ["curl", "-sS", "--max-time", "20",
       "-H", "Authorization: Bearer " + accessToken,
       "-H", "User-Agent: bambu_network_agent/01.09.05.01",
       "-H", "Accept: application/json",
       "-w", "\n__HTTP__%{http_code}",
-      Model.urlMessages(region, 25, 0)]
+      Model.urlMessages(region, 15, 0, cat)]
     listProc.running = true
   }
 
@@ -96,20 +117,23 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        root.loading = false
         var r = Model.splitHttp(text)
-        if (r.status === 401 || r.status === 403) { root.listError = "sign-in expired"; return }
-        if (r.status < 200 || r.status >= 300) { root.listError = "HTTP " + r.status; return }
-        try {
-          var raw = Model.extractMessages(JSON.parse(r.body))
-          var out = []
-          for (var i = 0; i < raw.length; i++) out.push(Model.formatMessage(raw[i], root.region))
-          out.sort(function (a, b) { return b.ts - a.ts })
-          root.messages = out
-          root.listError = ""
-        } catch (e) {
-          root.listError = "could not read the response"
+        if (r.status === 401 || r.status === 403) {
+          root.listError = "sign-in expired"; root.catQueue = []; root.loading = false; return
         }
+        if (r.status >= 200 && r.status < 300) {
+          try {
+            var raw = Model.extractMessages(JSON.parse(r.body))
+            var out = []
+            for (var i = 0; i < raw.length; i++) out.push(Model.formatMessage(raw[i], root.region))
+            root.catResults = root.catResults.concat([out])
+          } catch (e) {
+            root.listError = "could not read the response"
+          }
+        } else {
+          root.listError = "HTTP " + r.status
+        }
+        Qt.callLater(root.pumpList)
       }
     }
   }
@@ -119,7 +143,8 @@ Panel {
     if (url && url !== "") Quickshell.execDetached(["omarchy-launch-browser", String(url)])
   }
   function openMyModels() {
-    openUrl(Model.siteBase(region) + "/en/my/models")
+    // The notification centre - the thing this popup mirrors.
+    openUrl(Model.messagesPageUrl(region))
   }
   function markAllRead() {
     if (svc && svc.markAllRead) svc.markAllRead()
@@ -533,7 +558,7 @@ Panel {
               border.color: root.dim
               Text {
                 anchors.centerIn: parent
-                text: "Open MakerWorld " + String.fromCharCode(0x2197)
+                text: "Notifications " + String.fromCharCode(0x2197)
                 color: root.fg
                 font.family: root.mono
                 font.pixelSize: Style.font.caption

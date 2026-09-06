@@ -194,14 +194,81 @@ test("extractMessages finds the array in various shapes", () => {
   assert.equal(M.extractMessages({ nope: 1 }).length, 0);
 });
 
-test("classifyMessage by type field and by text", () => {
-  assert.equal(M.classifyMessage({ bizType: "DESIGN_COMMENT" }), "comment");
-  assert.equal(M.classifyMessage({ type: "comment_reply" }), "reply");
-  assert.equal(M.classifyMessage({ title: "Someone liked your model" }), "like");
-  assert.equal(M.classifyMessage({ content: "You have a new follower" }), "follow");
-  assert.equal(M.classifyMessage({ content: "You earned 30 points" }), "points");
-  assert.equal(M.classifyMessage({ type: "SYSTEM_NOTICE" }), "system");
-  assert.equal(M.classifyMessage({ foo: "bar" }), "other");
+// ---- real notification envelopes (captured live) ------------------
+
+const MSG_RATING = {
+  id: 2245597530, type: 251, isread: 0, createTime: "2026-09-05T15:27:33Z",
+  from: { uid: 1, name: "Wolli", handle: "user_1" },
+  instRating: {
+    id: 284759039,
+    designInfo: { id: 159401, uid: 9, title: "Wago 221 Connector Box", cover: "x", modelId: "" },
+    instanceInfo: { id: 175002, title: "0.2mm layer" },
+    score: 5, content: "Perfekt! Nützliches Teil für Heimwerker.",
+  },
+};
+const MSG_COMMENTED = {
+  id: 2226477609, type: 201, createTime: "2026-09-01T00:00:00Z",
+  from: { uid: 2, name: "TonyBlokeDesigns" },
+  designCommented: {
+    designInfo: { id: 462884, title: "The Princess Bride Buttercup Dagger", modelId: "" },
+    commentInfo: { id: 7311421, uid: 3, content: "This is a great little movie prop <b>x</b>", images: [] },
+  },
+};
+const MSG_REPLIED = {
+  id: 2225071994, type: 202, createTime: "2026-09-01T01:00:00Z",
+  from: { uid: 4, name: "Curious" },
+  commentReplied: {
+    designInfo: { id: 3175483, title: "Waveshare AMOLED Mount" },
+    commentInfo: { content: "first question" },
+    commentReply: { content: "so is it best to use a case?" },
+  },
+};
+const MSG_BOOSTED = {
+  id: 2235075159, type: 503, createTime: "2026-08-30T00:00:00Z",
+  from: { uid: 5, name: "user_570093703" },
+  pointDesignBoosted: {
+    designId: 71028, designTitle: "Cleveland Browns Lightbox",
+    designBoostCnt: 6, boostedByUsername: "user_570093703",
+  },
+};
+const MSG_SYSTEM = {
+  id: 2204111083, type: 412, createTime: "2026-08-20T00:00:00Z", from: null,
+  systemForWeb: {
+    systemInfo: {
+      uid: 0, title: "PrintMon Maker & AI Scanner – Discontinuation Notice",
+      bio: "Thank you for the journey.", content: "Dear MakerWorld users,\nlong text …",
+    },
+  },
+};
+const MSG_COMMUNITY = {
+  id: 2068664378, type: 603, createTime: "2026-07-31T13:16:09Z", from: null,
+  communityPostLiked: {
+    post: { postId: 1815240, type: 66, content: "{\"content\":[]}", designId: 3034987 },
+    users: [{ uid: 6, name: "Aaron", handle: "Aaron.reed" }], userCount: 1,
+  },
+};
+const MSG_PRINT = {
+  id: 2248799006, type: 6, createTime: "2026-09-05T15:27:33Z", from: null,
+  taskMessage: { id: 1, title: "test.stl", designId: 0, status: 2, deviceName: "X1 Carbon", detail: "Task Success" },
+};
+
+test("payloadOf picks the one non-envelope object", () => {
+  assert.equal(M.payloadOf(MSG_RATING).key, "instRating");
+  assert.equal(M.payloadOf(MSG_BOOSTED).key, "pointDesignBoosted");
+  assert.equal(M.payloadOf({ id: 1, type: 2, from: null, isread: 0, createTime: "x" }).key, "");
+});
+
+test("classifyMessage: numeric event codes then text fallback", () => {
+  assert.equal(M.classifyMessage(MSG_RATING), "comment");
+  assert.equal(M.classifyMessage(MSG_COMMENTED), "comment");
+  assert.equal(M.classifyMessage(MSG_REPLIED), "reply");
+  assert.equal(M.classifyMessage(MSG_BOOSTED), "points");
+  assert.equal(M.classifyMessage(MSG_SYSTEM), "system");
+  assert.equal(M.classifyMessage(MSG_COMMUNITY), "like");
+  assert.equal(M.classifyMessage(MSG_PRINT), "print");
+  // unknown code -> guess from payload key / text
+  assert.equal(M.classifyMessage({ type: 99999, someReply: { content: "re: hi" } }), "reply");
+  assert.equal(M.classifyMessage({ type: 99999, blob: { title: "policy update" } }), "system");
 });
 
 test("messageTs handles seconds, millis, ISO", () => {
@@ -211,41 +278,83 @@ test("messageTs handles seconds, millis, ISO", () => {
   assert.equal(M.messageTs({}), 0);
 });
 
-test("formatMessage builds body + model url", () => {
-  const f = M.formatMessage({
-    bizType: "comment",
-    senderName: "Alice",
-    designTitle: "Cable Clip",
-    content: "<p>Nice&nbsp;print!</p>",
-    designId: "998877",
-    createTime: 1700000000,
-  }, "global");
+test("formatMessage: rating -> comment, model url, actor + design + text", () => {
+  const f = M.formatMessage(MSG_RATING, "global");
   assert.equal(f.cls, "comment");
   assert.equal(f.title, "New comment");
-  assert.equal(f.url, "https://makerworld.com/en/models/998877");
-  assert.match(f.body, /Alice/);
-  assert.match(f.body, /Cable Clip/);
-  assert.match(f.body, /Nice print!/);
+  assert.equal(f.url, "https://makerworld.com/en/models/159401");
+  assert.match(f.body, /Wolli/);
+  assert.match(f.body, /Wago 221 Connector Box/);
+  assert.match(f.body, /Perfekt/);
+  assert.equal(f.read, false);
+  assert.equal(String(f.id), "2245597530");
+});
+
+test("formatMessage: reply uses the latest reply text + design", () => {
+  const f = M.formatMessage(MSG_REPLIED, "global");
+  assert.equal(f.cls, "reply");
+  assert.equal(f.url, "https://makerworld.com/en/models/3175483");
+  assert.match(f.body, /best to use a case/);
   assert.ok(!/[<>]/.test(f.body), "html stripped");
 });
 
-test("formatMessage falls back to messages page when no id/link", () => {
-  const f = M.formatMessage({ type: "system", content: "Policy update" }, "global");
-  assert.equal(f.url, "https://makerworld.com/en/my/messages");
+test("formatMessage: design boost -> points, boost count, model url", () => {
+  const f = M.formatMessage(MSG_BOOSTED, "global");
+  assert.equal(f.cls, "points");
+  assert.equal(f.url, "https://makerworld.com/en/models/71028");
+  assert.match(f.body, /boosted/);
+  assert.match(f.body, /Cleveland Browns Lightbox/);
+  assert.match(f.body, /6 total/);
+});
+
+test("formatMessage: system message -> title, no design -> notification centre", () => {
+  const f = M.formatMessage(MSG_SYSTEM, "global");
+  assert.equal(f.cls, "system");
+  assert.equal(f.url, "https://makerworld.com/en/my/notification");
+  assert.match(f.body, /Discontinuation Notice/);
+  assert.match(f.body, /Thank you for the journey/);
+});
+
+test("formatMessage: community like digs post.designId", () => {
+  const f = M.formatMessage(MSG_COMMUNITY, "global");
+  assert.equal(f.cls, "like");
+  assert.equal(f.url, "https://makerworld.com/en/models/3034987");
+  assert.match(f.body, /Aaron/);
+});
+
+test("urlMessages + categoryParamForClass", () => {
+  assert.match(M.urlMessages("global", 15, 0, 1), /[?&]type=1(&|$)/);
+  assert.ok(!/type=/.test(M.urlMessages("global", 15, 0)), "no category -> no type param");
+  assert.equal(M.categoryParamForClass("comment"), 1);
+  assert.equal(M.categoryParamForClass("reply"), 1);
+  assert.equal(M.categoryParamForClass("like"), 5);
+  assert.equal(M.categoryParamForClass("points"), 2);
+  assert.equal(M.categoryParamForClass("system"), 3);
+  assert.equal(M.categoryParamForClass("follow"), 3);
+});
+
+test("mergeMessageLists: dedup, drop print, newest first, limit", () => {
+  const listA = [M.formatMessage(MSG_COMMENTED, "global"), M.formatMessage(MSG_PRINT, "global")];
+  const listB = [M.formatMessage(MSG_REPLIED, "global"), M.formatMessage(MSG_COMMENTED, "global")];
+  const merged = M.mergeMessageLists([listA, listB], "global", { dropPrint: true, limit: 10 });
+  assert.equal(merged.length, 2, "print dropped, MSG_COMMENTED deduped");
+  assert.equal(String(merged[0].id), "2225071994", "MSG_REPLIED (Sep 1 01:00) newest");
+  assert.ok(merged.every((m) => m.cls !== "print"));
 });
 
 test("selectFresh: unseen + allowed + capped + oldest-first", () => {
+  const mk = (id, type, ms) => ({ id, type, createTime: ms, designCommented: { designInfo: { id: 1 } } });
   const raw = [
-    { id: "a", bizType: "comment", createTime: 30 },
-    { id: "b", bizType: "like", createTime: 10 },
-    { id: "c", bizType: "comment", createTime: 20 },
-    { id: "d", bizType: "follow", createTime: 40 },
+    mk("a", 201, 30000), // comment
+    { id: "b", type: 603, createTime: 10000, communityPostLiked: {} }, // like
+    mk("c", 201, 20000), // comment
+    { id: "d", type: 301, createTime: 40000, followed: {} }, // follow
   ];
   const out = M.selectFresh(raw, ["a"], ["comment", "like"], 5, "global");
-  assert.deepEqual(out.map((x) => x.id), ["b", "c"], "b(10) before c(20); a seen; d wrong class");
+  assert.deepEqual(out.map((x) => x.id), ["b", "c"], "b(10s) before c(20s); a seen; d wrong class");
 
   const capped = M.selectFresh(raw, [], ["comment", "like", "follow"], 2, "global");
-  assert.deepEqual(capped.map((x) => x.id), ["a", "d"], "keep newest 2 by ts (a=30, d=40)");
+  assert.deepEqual(capped.map((x) => x.id), ["a", "d"], "keep newest 2 by ts (a=30s, d=40s)");
 });
 
 test("mergeSeen bounds the ring buffer", () => {
