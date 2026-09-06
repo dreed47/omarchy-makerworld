@@ -57,10 +57,10 @@ BarWidget {
     if (panelLoader.item) panelLoader.item.closeForPopoutSwitch()
   }
 
-  visible: panelLoader.item && panelLoader.item.label !== ""
+  visible: panelLoader.item !== null
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
-  readonly property real openPanelIndicatorWidth: button.labelWidth
+  readonly property real openPanelIndicatorWidth: pillRow.implicitWidth
 
   onBarChanged: injectPanel()
   onSettingsChanged: injectPanel()
@@ -76,26 +76,50 @@ BarWidget {
     }
   }
 
-  // WidgetButton (not BarIconButton): the pill is a multi-char text label
-  // ("<coins>  1,240  •3"), so it must size to its text.
+  // The MakerWorld cube mark, then the point balance / unread badge as text.
+  // WidgetButton owns click routing, tooltip, and the bar's reveal wiring; its
+  // own centred label is switched off and we lay out our own Row instead.
+  readonly property bool expired: root.svc && root.svc.connState === "expired"
+  readonly property string pillText: panelLoader.item ? String(panelLoader.item.pillText || "") : ""
+
   WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-
-    // A warning triangle when the sign-in has lapsed, prefixed to whatever the
-    // panel decided to show.
-    readonly property string warn: (root.svc && (root.svc.connState === "expired"))
-      ? String.fromCharCode(0xf071) + "  " : ""
-
-    text: warn + (panelLoader.item ? panelLoader.item.label : "")
+    labelVisible: false
+    hasVisualContent: true
     tooltipText: panelLoader.item ? panelLoader.item.tooltip : ""
+    fixedWidth: pillRow.implicitWidth + Style.spaceReal(17)
 
     onPressed: function (b) {
       if (!root.bar) return
       if (b === Qt.RightButton) root.notify()
       else if (b === Qt.MiddleButton) root.refresh()
       else root.togglePanel()
+    }
+
+    Row {
+      id: pillRow
+      anchors.centerIn: parent
+      spacing: Style.spaceReal(5)
+
+      MakerWorldMark {
+        anchors.verticalCenter: parent.verticalCenter
+        width: Math.round(button.height * 0.52)
+        height: width
+        color: button.foreground
+        opacity: root.expired ? 0.45 : 1
+      }
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        visible: root.expired || root.pillText !== ""
+        text: (root.expired ? String.fromCharCode(0xf071) + "  " : "") + root.pillText
+        color: root.expired && root.bar ? root.bar.urgent : button.foreground
+        font.family: button.fontFamily
+        font.pixelSize: button.fontSize
+        renderType: Text.NativeRendering
+      }
     }
   }
 }

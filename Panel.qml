@@ -41,14 +41,18 @@ Panel {
   readonly property string coinGlyph: Model.glyphFor("points")
   readonly property string bullet: String.fromCharCode(0x2022)
 
-  // ---- Bar-pill label / tooltip (read by BarWidget.qml) ----------------
-  readonly property string label: {
-    if (connState === "notoken") return brandGlyph
+  // ---- Bar-pill text / tooltip (read by BarWidget.qml) ----------------
+  //
+  // Text only - the cube mark is drawn by the widget. Empty string = the pill
+  // shows just the mark (fresh install, or points hidden with nothing unread).
+  readonly property string pillText: {
+    if (connState === "notoken") return ""
     var parts = []
-    if (cfg.showPoints && points >= 0) parts.push(coinGlyph + " " + Model.groupNum(points))
+    if (cfg.showPoints && points >= 0) parts.push(Model.groupNum(points))
     if (unreadTotal > 0) parts.push(bullet + unreadTotal)
-    return parts.length ? parts.join("  ") : brandGlyph
+    return parts.join("  ")
   }
+  readonly property string label: pillText  // back-compat alias
   readonly property string tooltip: {
     if (connState === "notoken") return "MakerWorld — run makerworld-login to sign in"
     if (connState === "expired") return "MakerWorld — sign-in expired, run makerworld-login"
