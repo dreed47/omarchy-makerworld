@@ -11,9 +11,14 @@ The API is undocumented, so on any unexpected response the raw JSON is printed
 and you can fall back to `makerworld-token --paste` with a token grabbed from
 the browser dev tools (Authorization header on makerworld.com/api requests).
 
+Run this in a real terminal - it needs to prompt for a password and often an
+emailed code, so it cannot run through a pipe or a non-interactive shell.
+
 Usage:
-  makerworld-login                 # prompts for everything
-  makerworld-login --region china  # .cn account
+  makerworld-login                        # prompts for everything
+  makerworld-login --region china         # .cn account
+  makerworld-login --account you@x.com --password-stdin < pwfile
+  makerworld-login --account you@x.com --password-stdin --code 123456 < pwfile
 """
 
 from __future__ import annotations
@@ -57,20 +62,38 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Sign in to Bambu Cloud for the MakerWorld plugin.")
     ap.add_argument("--region", choices=["global", "china"], help="account region (default: ask)")
     ap.add_argument("--account", help="email or phone (default: ask)")
+    ap.add_argument("--password-stdin", action="store_true",
+                    help="read the password from the first line of stdin instead of prompting")
+    ap.add_argument("--code", help="emailed verification / TFA code, if you already have one")
     args = ap.parse_args()
+
+    interactive = sys.stdin.isatty()
+    if not interactive and not (args.account and args.password_stdin):
+        print("makerworld-login needs a terminal (password + emailed code prompts).\n"
+              "Open a normal terminal and run:  makerworld-login\n"
+              "Or script it:  makerworld-login --account you@example.com --password-stdin < pwfile",
+              file=sys.stderr)
+        return 2
 
     region = args.region
     if not region:
-        ans = input("Region [global/china] (default global): ").strip().lower()
+        ans = input("Region [global/china] (default global): ").strip().lower() if interactive else ""
         region = "china" if ans in ("china", "cn") else "global"
     region = mw.norm_region(region)
     base = mw.api_base(region)
 
-    account = args.account or input("Bambu account (email or phone): ").strip()
+    account = args.account or (input("Bambu account (email or phone): ").strip() if interactive else "")
     if not account:
         print("no account given", file=sys.stderr)
         return 2
-    password = getpass.getpass("Password: ")
+
+    if args.password_stdin:
+        password = sys.stdin.readline().rstrip("\n")
+    else:
+        password = getpass.getpass("Password: ")
+    if not password:
+        print("no password given", file=sys.stderr)
+        return 2
 
     print(f"\nSigning in to {base} ...")
     res = mw.http("POST", base + "/v1/user-service/user/login",
@@ -82,7 +105,12 @@ def main() -> int:
     if not tokens and _tfa_key(obj):
         key = _tfa_key(obj)
         print("This account has two-factor authentication enabled.")
-        code = input("Authenticator (TFA) code: ").strip()
+        code = (args.code or "").strip()
+        if not code and interactive:
+            code = input("Authenticator (TFA) code: ").strip()
+        if not code:
+            print("re-run with --code <authenticator code>", file=sys.stderr)
+            return 2
         tres = mw.http("POST", mw.tfa_base(region) + "/api/sign-in/tfa",
                        payload={"tfaKey": key, "tfaCode": code})
         tobj = tres.json() or {}
@@ -108,7 +136,12 @@ def main() -> int:
                     payload={"email": account, "type": "codeLogin"})
         except SystemExit:
             pass
-        code = input("Email verification code: ").strip()
+        code = (args.code or "").strip()
+        if not code and interactive:
+            code = input("Email verification code: ").strip()
+        if not code:
+            print("check your email, then re-run with --code <code>", file=sys.stderr)
+            return 2
         vres = mw.http("POST", base + "/v1/user-service/user/login",
                        payload={"account": account, "code": code})
         vobj = vres.json() or {}
