@@ -245,21 +245,33 @@ function canonCountKey(rawKey) {
   return null;
 }
 
-// parseCounts(json) -> { byType: {comment:N,...}, total:N }
-// Accepts: {commentCount:1,...}, {counts:{...}}, {list:[{type,count}]},
-// {data:{...}}, or a bare {total: N}.
+// parseCounts(json) -> { byType, total, apiUnreadTotal, sawType }
+//
+//   byType          per-category unread for the categories we surface
+//                   (comment/reply/like/follow/system/points). Nothing else.
+//   total           SUM of byType - the number the bar badge shows. It is NOT
+//                   the API's `unreadTotal`, which on a real account is
+//                   dominated by print-job (`deviceCount`) notifications - 674
+//                   of them on the author's account at the time of writing.
+//   apiUnreadTotal  the API's own grand total, kept for debug only.
+//
+// Accepts a flat `{commentCount:1,...}` object (the real shape), `{counts:{}}`,
+// `{list:[{type,count}]}`, or a `data`-wrapped version of any of those.
 function parseCounts(json) {
   var d = unwrap(json) || {};
   var byType = {};
-  var total = 0;
+  var apiUnreadTotal = 0;
   var sawType = false;
 
   function addPair(key, val) {
     var n = parseInt(val, 10);
     if (isNaN(n)) return;
+    var norm = String(key).toLowerCase().replace(/[_\s-]/g, "");
+    if (norm === "unreadtotal" || norm === "total" || norm === "totalunread") {
+      if (n > apiUnreadTotal) apiUnreadTotal = n;
+    }
     var canon = canonCountKey(key);
     if (canon) { byType[canon] = (byType[canon] || 0) + n; sawType = true; }
-    if (String(key).toLowerCase().replace(/[_\s-]/g, "").indexOf("total") !== -1) total = n;
   }
 
   function walk(obj, depth) {
@@ -285,25 +297,20 @@ function parseCounts(json) {
 
   walk(d, 0);
 
-  var sum = 0;
-  for (var key in byType) sum += byType[key];
-  if (!total) total = sum || parseInt((d && (d.total || d.totalUnread || d.unread)) , 10) || 0;
-  return { byType: byType, total: total, sawType: sawType };
+  var total = 0;
+  for (var key in byType) total += (byType[key] || 0);
+  return { byType: byType, total: total, apiUnreadTotal: apiUnreadTotal, sawType: sawType };
 }
 
 // Which canonical categories went up between two parseCounts().byType maps.
-// A rise in `total` with no per-type data yields ["system"] as a catch-all so
-// something is still surfaced.
-function diffCounts(prevByType, curByType, prevTotal, curTotal) {
+// Only the categories we map are considered, so a bump in print-job / device
+// notifications never triggers anything.
+function diffCounts(prevByType, curByType) {
   var prev = prevByType || {};
   var cur = curByType || {};
   var up = [];
   for (var k in cur) {
     if ((cur[k] || 0) > (prev[k] || 0)) up.push(k);
-  }
-  if (!up.length && prevTotal !== undefined && curTotal !== undefined
-      && curTotal > prevTotal && Object.keys(cur).length === 0) {
-    up.push("system");
   }
   return up;
 }

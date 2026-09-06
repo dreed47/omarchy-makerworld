@@ -135,30 +135,53 @@ test("isAuthError", () => {
 
 // ---- counts -----------------------------------------------------
 
-test("parseCounts: flat *Count keys", () => {
+test("parseCounts: flat *Count keys, total is the sum of mapped types", () => {
   const r = M.parseCounts({ commentCount: 2, likeCount: 5, fansCount: 1, systemCount: 0, totalUnread: 8 });
   assert.equal(r.byType.comment, 2);
   assert.equal(r.byType.like, 5);
   assert.equal(r.byType.follow, 1);
-  assert.equal(r.total, 8);
+  assert.equal(r.total, 8, "2 + 5 + 1 + 0");
+  assert.equal(r.apiUnreadTotal, 8);
+});
+
+test("parseCounts: real /message/count payload ignores device/print noise", () => {
+  const r = M.parseCounts({
+    noticeCount: 0, messageCount: 0, total: 0, commentCount: 0, designCount: 0,
+    systemCount: 0, deviceCount: 674, communityCount: 0, paidContentCount: 0,
+    crowdfundingMessageCount: 0, unreadTotal: 674, IMUnreadCount: 0,
+    bubbleMsg: [], taskPopup: null,
+  });
+  assert.equal(r.total, 0, "no comments/system/etc -> badge shows nothing");
+  assert.equal(r.apiUnreadTotal, 674, "API grand total kept for debug only");
+  assert.equal(r.byType.like, undefined);
+  assert.equal(M.unreadTotalOf(r.byType), 0);
+  // ... and a real comment lands
+  const withComment = M.parseCounts({ commentCount: 2, noticeCount: 1, deviceCount: 700, unreadTotal: 703 });
+  assert.equal(withComment.total, 3, "2 comments + 1 notice(->system)");
+  assert.equal(withComment.byType.comment, 2);
+  assert.equal(withComment.byType.system, 1);
+  assert.equal(withComment.apiUnreadTotal, 703);
 });
 
 test("parseCounts: nested + array of {type,count}", () => {
   const nested = M.parseCounts({ data: { counts: { comment: 3, praise: 4 } } });
   assert.equal(nested.byType.comment, 3);
   assert.equal(nested.byType.like, 4);
+  assert.equal(nested.total, 7);
   const arr = M.parseCounts({ list: [{ type: "follow", count: 2 }, { type: "reply", count: 1 }] });
   assert.equal(arr.byType.follow, 2);
   assert.equal(arr.byType.reply, 1);
 });
 
-test("diffCounts: per-type rise + total-only fallback", () => {
+test("diffCounts: only mapped categories, device bumps ignored", () => {
   assert.deepEqual(
     M.diffCounts({ comment: 1, like: 2 }, { comment: 3, like: 2 }).sort(),
     ["comment"]
   );
-  assert.deepEqual(M.diffCounts({}, {}, 4, 7), ["system"], "total rose, no per-type");
-  assert.deepEqual(M.diffCounts({ like: 1 }, { like: 1 }, 5, 5), []);
+  assert.deepEqual(M.diffCounts({}, {}), [], "no per-type change");
+  assert.deepEqual(M.diffCounts({ like: 1 }, { like: 1 }), []);
+  // a device/print count is never in byType, so it can't appear here
+  assert.deepEqual(M.diffCounts({ system: 0 }, { system: 0 }), []);
 });
 
 // ---- message list --------------------------------------------

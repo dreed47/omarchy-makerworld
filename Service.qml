@@ -101,7 +101,10 @@ Item {
         root.connState = "notoken"
       } else {
         root.connState = "init"
-        if (Model.tokenNeedsRefresh(root.tokenExp, Math.floor(Date.now() / 1000)))
+        // Bambu's access token is an opaque string, not a JWT, so tokenExp is
+        // usually 0 (unknown). Only pre-emptively refresh when we actually
+        // have an expiry to act on; otherwise rely on a 401 to trigger it.
+        if (root.tokenExp > 0 && Model.tokenNeedsRefresh(root.tokenExp, Math.floor(Date.now() / 1000)))
           Qt.callLater(root.beginRefresh)
         else {
           Qt.callLater(root.pollCounts)
@@ -123,6 +126,7 @@ Item {
   // ---- Live state the bar pill / popup read -----------------------
   property var unreadByType: ({})
   property int unreadTotal: 0
+  property int apiUnreadTotal: 0   // API grand total (mostly print jobs); debug only
   property double points: -1
   property string profileName: ""
   // "init" | "ok" | "expired" | "notoken"
@@ -198,9 +202,12 @@ Item {
     var prev = {}
     try { prev = JSON.parse(state.lastCountsJson || "{}") || {} } catch (e) {}
 
-    // Always publish the current numbers for the pill / popup.
+    // Always publish the current numbers for the pill / popup. `parsed.total`
+    // is the sum of the categories we surface - NOT the API's unreadTotal,
+    // which is mostly print-job notifications.
     root.unreadByType = parsed.byType
-    root.unreadTotal = parsed.total || Model.unreadTotalOf(parsed.byType)
+    root.unreadTotal = parsed.total
+    root.apiUnreadTotal = parsed.apiUnreadTotal
     root.connState = "ok"
     root.refreshFailedNotified = false
 
@@ -211,7 +218,7 @@ Item {
       return
     }
 
-    var up = Model.diffCounts(prev, parsed.byType, state.lastTotal, root.unreadTotal)
+    var up = Model.diffCounts(prev, parsed.byType)
     state.lastCountsJson = JSON.stringify(parsed.byType)
     state.lastTotal = root.unreadTotal
 
@@ -437,6 +444,7 @@ Item {
         baselined: state.baselined,
         unreadTotal: root.unreadTotal,
         unreadByType: root.unreadByType,
+        apiUnreadTotal: root.apiUnreadTotal,
         points: root.points,
         profileName: root.profileName,
         notify: root.cfg.notify,
