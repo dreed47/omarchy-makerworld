@@ -36,26 +36,57 @@ community reverse-engineering. Consequences:
 
 ## Install
 
-Install via the Omarchy plugin manager, or clone into
-`~/.config/omarchy/plugins/io.github.dreed47.makerworld/`.
+1. Install via the Omarchy plugin manager, or clone into
+   `~/.config/omarchy/plugins/io.github.dreed47.makerworld/`.
+2. **Get a token** (once) — pick whichever of the three below suits you.
+3. `omarchy plugin enable io.github.dreed47.makerworld`
+4. `omarchy-restart-shell`
 
-Then sign in once:
+There is no MakerWorld API key. Auth is your normal **Bambu Cloud account** —
+the same login Bambu Handy and Bambu Studio use. Only the resulting token is
+stored (`~/.config/omarchy/makerworld/token.json`, mode `600`); your password
+is used for one request and never written anywhere.
+
+All three commands below are in the plugin's `bin/` directory; adjust the path
+if you cloned elsewhere.
+
+### A. Import from Bambu Studio / Orca Slicer (no password)
 
 ```sh
-~/.config/omarchy/plugins/io.github.dreed47.makerworld/bin/makerworld-login
+bin/makerworld-login --from-slicer
 ```
 
-It asks for your Bambu account, password, and region, and handles the emailed
-verification code or authenticator (TFA) prompt if your account uses one. On
-success it writes `token.json` and a default `config.json`, then enable the
-plugin (or restart `omarchy-shell`).
+If a signed-in slicer config is found, `makerworld-login` (with no arguments)
+also offers this automatically. **Caveat:** current Bambu Studio / Orca builds
+encrypt the cloud token on disk, so this often can't work — it will tell you
+so and fall back to B or C. Older/native installs that keep the token in
+plaintext do work.
 
-If automated login fails for your account, grab a token from browser dev tools
-(the `Authorization: Bearer …` header on any `makerworld.com/api` request while
-logged in) and paste it:
+### B. Log in with your Bambu account
 
 ```sh
-bin/makerworld-token --paste
+bin/makerworld-login
+```
+
+Prompts for region, account, password, and — usually — a code Bambu emails
+you. Authenticator (TFA) accounts are handled too. To script it:
+`makerworld-login --account you@example.com --password-stdin < pwfile`.
+
+### C. Paste a token from your browser
+
+1. Sign in to <https://makerworld.com> in your browser.
+2. Open dev tools → Network, reload, click any request to `api.bambulab.com`
+   or `makerworld.com/api`.
+3. Copy the value after `Bearer ` in the **Authorization** request header.
+4. Run `bin/makerworld-token --paste` and paste it (add
+   `--region china` for a `.cn` account).
+
+This has no refresh token, so you'll repeat it whenever the token expires.
+
+### Check it worked
+
+```sh
+bin/makerworld-token --check      # -> "token works - profile: <your name>"
 ```
 
 ## Configuration
@@ -106,7 +137,7 @@ Both accept booleans and `"on"`/`"off"`.
 
 | Tool | Purpose |
 |---|---|
-| `bin/makerworld-login` | interactive one-time Bambu Cloud sign-in |
+| `bin/makerworld-login` | one-time sign-in: `--from-slicer` (import), password login (default), or scripted with `--password-stdin` |
 | `bin/makerworld-refresh` | non-interactive access-token refresh (run by the service) |
 | `bin/makerworld-token` | `--status` (default), `--check`, `--path`, `--paste` |
 

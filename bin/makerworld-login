@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """Sign in to Bambu Cloud and store a token for the MakerWorld plugin.
 
-Interactive. Handles the three login outcomes seen in the wild:
+Three ways to get a token, in order of least hassle:
 
-  1. password login succeeds outright               -> tokens returned
-  2. account requires an emailed verification code  -> prompt, verify
-  3. account has TFA (authenticator) enabled        -> prompt tfaCode, verify
+  A. Import it from Bambu Studio / Orca Slicer (no password needed) - offered
+     automatically if a signed-in slicer config is found, or `--from-slicer`.
+  B. Log in with your Bambu account - prompts for password and, usually, a
+     code emailed by Bambu (authenticator/TFA accounts also handled).
+  C. Paste a token from browser dev tools:  makerworld-token --paste
 
-The API is undocumented, so on any unexpected response the raw JSON is printed
-and you can fall back to `makerworld-token --paste` with a token grabbed from
-the browser dev tools (Authorization header on makerworld.com/api requests).
-
-Run this in a real terminal - it needs to prompt for a password and often an
-emailed code, so it cannot run through a pipe or a non-interactive shell.
+Run this in a real terminal - options A/B prompt interactively.
 
 Usage:
-  makerworld-login                        # prompts for everything
+  makerworld-login                        # auto: offer slicer import, else login
+  makerworld-login --from-slicer          # import from Bambu Studio / Orca only
+  makerworld-login --from-slicer ~/path   # ...from a specific config dir/file
   makerworld-login --region china         # .cn account
   makerworld-login --account you@x.com --password-stdin < pwfile
   makerworld-login --account you@x.com --password-stdin --code 123456 < pwfile
@@ -58,6 +57,76 @@ def _tfa_key(obj: dict) -> str:
     return d.get("tfaKey") or d.get("tfa_key") or ""
 
 
+def _finish(record: dict, source: str) -> int:
+    mw.save_token(record)
+    if mw.scaffold_config():
+        print(f"Wrote default config      {mw.CONFIG_FILE}")
+    print(f"Saved token               {mw.TOKEN_FILE}")
+    print(f"  source                  {source}")
+    print(f"  account                 {record.get('account', '(unknown)')}")
+    print(f"  region                  {record.get('region', 'global')}")
+    print(f"  access token            {mw.mask(record['accessToken'])}")
+    print(f"  expires                 {mw.exp_human(record['accessToken'])}")
+    print(f"  refresh token           "
+          f"{'yes' if record.get('refreshToken') else 'NO (re-run makerworld-login when it expires)'}")
+    print("\nEnable the MakerWorld plugin in Omarchy (or restart omarchy-shell) to start polling.")
+    return 0
+
+
+def _verify(record: dict) -> bool:
+    """Confirm a token authenticates; fill in the account name from the profile."""
+    try:
+        r = mw.http("GET", mw.api_base(record["region"])
+                    + "/v1/design-user-service/my/profile", token=record["accessToken"])
+    except SystemExit:
+        return False
+    if r.status != 200:
+        return False
+    d = mw.unwrap(r.json()) or {}
+    name = d.get("account") or d.get("name") or d.get("handle")
+    if name:
+        record["account"] = str(name)
+    return True
+
+
+def _import_from_slicer(explicit: str | None) -> int:
+    found = mw.find_slicer_token(explicit)
+    if not found:
+        print("No Bambu Studio / Orca Slicer config found. Looked in:", file=sys.stderr)
+        for _, d in mw.SLICER_DIRS:
+            print("  " + d, file=sys.stderr)
+        print("\nSign in to one of those slicers, or run  makerworld-login  with your "
+              "Bambu password.", file=sys.stderr)
+        return 1
+    if found.get("error"):
+        print(found["error"] + ".", file=sys.stderr)
+        for f in found.get("encrypted_files", []):
+            print("  encrypted:  " + f, file=sys.stderr)
+        for f in found.get("seen_files", []):
+            print("  inspected:  " + f, file=sys.stderr)
+        if found.get("seen_keys"):
+            print("  keys seen:  " + ", ".join(found["seen_keys"]), file=sys.stderr)
+        print("\nModern Bambu Studio / Orca encrypt the cloud token, so import often\n"
+              "isn't possible. Use  makerworld-login  (Bambu password) or\n"
+              "makerworld-token --paste  (token from browser dev tools).", file=sys.stderr)
+        return 1
+
+    record = {
+        "accessToken": found["accessToken"],
+        "refreshToken": found.get("refreshToken", ""),
+        "region": found.get("region", "global"),
+        "account": "(imported)",
+    }
+    print(f"Found a Bambu Cloud token in {found['source']}")
+    print("Checking it works ...")
+    if not _verify(record):
+        print("\nThat token did not authenticate - it is probably stale.", file=sys.stderr)
+        print("Open the slicer and sign in again, or run  makerworld-login  with your "
+              "password.", file=sys.stderr)
+        return 1
+    return _finish(record, found["source"])
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Sign in to Bambu Cloud for the MakerWorld plugin.")
     ap.add_argument("--region", choices=["global", "china"], help="account region (default: ask)")
@@ -65,13 +134,32 @@ def main() -> int:
     ap.add_argument("--password-stdin", action="store_true",
                     help="read the password from the first line of stdin instead of prompting")
     ap.add_argument("--code", help="emailed verification / TFA code, if you already have one")
+    ap.add_argument("--from-slicer", nargs="?", const=True, default=False,
+                    metavar="DIR_OR_FILE",
+                    help="import the token from Bambu Studio / Orca Slicer instead of logging in")
     args = ap.parse_args()
 
+    if args.from_slicer:
+        explicit = args.from_slicer if isinstance(args.from_slicer, str) else None
+        return _import_from_slicer(explicit)
+
     interactive = sys.stdin.isatty()
+
+    # With nothing specified, offer a slicer import before asking for a password.
+    if interactive and not args.account:
+        peek = mw.find_slicer_token()
+        if peek and not peek.get("error"):
+            where = peek["source"].split(":")[0]
+            ans = input(f"Found a Bambu Cloud token in {where}. "
+                        f"Use it (no password needed)? [Y/n]: ").strip().lower()
+            if ans in ("", "y", "yes"):
+                return _import_from_slicer(None)
+
     if not interactive and not (args.account and args.password_stdin):
         print("makerworld-login needs a terminal (password + emailed code prompts).\n"
               "Open a normal terminal and run:  makerworld-login\n"
-              "Or script it:  makerworld-login --account you@example.com --password-stdin < pwfile",
+              "Or:  makerworld-login --from-slicer   (import from Bambu Studio / Orca)\n"
+              "Or:  makerworld-login --account you@example.com --password-stdin < pwfile",
               file=sys.stderr)
         return 2
 
@@ -163,15 +251,7 @@ def main() -> int:
         "region": region,
         "account": account,
     }
-    mw.save_token(record)
-    if mw.scaffold_config():
-        print(f"Wrote default config      {mw.CONFIG_FILE}")
-    print(f"Saved token               {mw.TOKEN_FILE}")
-    print(f"  access token            {mw.mask(record['accessToken'])}")
-    print(f"  expires                 {mw.exp_human(record['accessToken'])}")
-    print(f"  refresh token           {'yes' if record['refreshToken'] else 'NO (will need re-login when it expires)'}")
-    print("\nEnable the MakerWorld plugin in Omarchy (or restart omarchy-shell) to start polling.")
-    return 0
+    return _finish(record, "Bambu account login")
 
 
 if __name__ == "__main__":

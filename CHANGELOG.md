@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `makerworld-login --from-slicer` — import an existing Bambu Cloud token from
+  a signed-in Bambu Studio / Orca Slicer config, skipping the password. Also
+  offered automatically by bare `makerworld-login` when a slicer config is
+  found. Detects and explains the common case where the slicer encrypts its
+  token (modern builds) and can't be imported.
+- README setup section rewritten around three token routes: slicer import,
+  Bambu account login, browser paste.
+
 ## 0.2.0 — unreleased
 
 Phase 2: bar pill + popup.
