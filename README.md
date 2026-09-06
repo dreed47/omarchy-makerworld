@@ -31,6 +31,8 @@ expiry.
 The pill/popup and the notifier are one plugin; you can mount just the service
 (no bar widget) if you only want notifications.
 
+<p align="center"><img src="docs/popup-my-models.png" alt="The popup's My models tab: point balance, follower / download / like counts, and a sortable list of published designs with per-model stats" width="440"></p>
+
 ## Unofficial API — read this first
 
 MakerWorld / Bambu Lab publish **no public API**. This plugin calls the same
@@ -120,7 +122,7 @@ Both accept booleans and `"on"`/`"off"`.
 |---|---|---|
 | `region` | `"global"` | `"global"` (api.bambulab.com) or `"china"` (api.bambulab.cn) |
 | `pollSeconds` | `300` | unread-count poll interval; floored at 120 |
-| `profileMinutes` | `15` | profile poll interval (points, followers, boost tokens); floored at 5 |
+| `profileMinutes` | `15` | profile poll interval (points, followers, boost tokens, download / like totals); floored at 5 |
 | `notify` | `on` | desktop notifications for new activity |
 | `notifyTypes` | all | any of `comment`, `reply`, `like`, `follow`, `system`, `points` (or `"all"`). `follow` covers new-follower alerts; `points` covers points-up, new boost tokens, and boost-token expiry |
 | `notifyTimeoutSeconds` | `0` | auto-dismiss after N seconds (0 = notification-daemon default) |
@@ -140,7 +142,8 @@ Both accept booleans and `"on"`/`"off"`.
   message IDs live in a bounded ring buffer in `PersistentProperties` so a
   shell reload doesn't re-notify. Publishes `points`, `followerCount`,
   `boostTokens`, `totalDownloads`, `totalLikes`, `unreadByType`, `unreadTotal`,
-  `profileName`, `connState` for the pill/popup.
+  `hasNew` / `newUnread` / `pointsDelta` (rise since the popup was last
+  opened), `profileName`, `connState` for the pill/popup.
 - Two poll loops: the fast one checks `/message/count`, and on a change pages
   only the affected notification category (comments / model activity / system
   / community — never print jobs). The slower one reads `/my/profile` for the
@@ -151,7 +154,9 @@ Both accept booleans and `"on"`/`"off"`.
 - `BarWidget.qml` / `Panel.qml` — the pill and its popup. The Activity tab
   makes its own per-category `/my/messages` fetch (when opened, then every 2
   min); the My models tab lazily fetches `/design-service/my/design/published`
-  the first time it's opened. The service owns polling and notifications.
+  the first time it's opened. Opening the popup calls `markSeen()` on the
+  service, which clears the pill's "something new" highlight. The service owns
+  polling and notifications.
 - On HTTP 401/403 the service runs `bin/makerworld-refresh`. If that fails it
   raises one "sign-in expired — run `makerworld-login`" notification, shows a
   warning triangle on the pill, and waits for `token.json` to change.

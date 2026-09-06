@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — unreleased
 
 - **"Something new" pill state** — the bar pill tracks what you'd seen the last
   time the popup was open (separate from MakerWorld's server read-state). When

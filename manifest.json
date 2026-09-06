@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.dreed47.makerworld",
   "name": "MakerWorld",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "David Reed",
   "license": "MIT",
-  "description": "MakerWorld (Bambu Lab) activity in your Omarchy bar and as desktop notifications. A bar pill shows your point balance and an unread badge; its popup lists recent comments, replies, likes, followers, and system messages, opens any of them on makerworld.com, and can mark everything read. A headless service polls your Bambu Cloud account on an interval and raises a notification for anything new. Unofficial - it uses the same endpoints the Bambu Handy app does, so you sign in once with the bundled makerworld-login helper.",
+  "description": "MakerWorld (Bambu Lab) activity in your Omarchy bar and as desktop notifications. A bar pill shows your point balance and an unread badge, and highlights in your theme accent when something has arrived since you last opened the popup. The popup has an Activity tab (recent comments, replies, likes, system messages - open any on makerworld.com, mark all read) and a My models tab (your published designs with per-model downloads, likes, prints and comments). A headless service polls your Bambu Cloud account and notifies for new comments, replies, likes, followers, points, boost tokens, boost-token expiry, and download / like milestones. Unofficial - it uses the same endpoints the Bambu Handy app does, so you sign in once with the bundled makerworld-login helper.",
   "kinds": [
     "service",
     "bar-widget"
@@ -17,7 +17,7 @@
   },
   "barWidget": {
     "displayName": "MakerWorld",
-    "description": "Point balance and unread badge for your MakerWorld account, with a popup of recent activity and desktop notifications for anything new.",
+    "description": "Point balance and an unread badge for your MakerWorld account that lights up when there's something new, a popup with recent activity and a 'my models' stats tab, and desktop notifications.",
     "category": "Info",
     "aliases": [
       "makerworld",
