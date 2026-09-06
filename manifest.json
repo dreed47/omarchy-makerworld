@@ -5,7 +5,7 @@
   "version": "0.3.0",
   "author": "David Reed",
   "license": "MIT",
-  "description": "MakerWorld (Bambu Lab) activity in your Omarchy bar and as desktop notifications. A bar pill shows your point balance and an unread badge, and highlights in your theme accent when something has arrived since you last opened the popup. The popup has an Activity tab (recent comments, replies, likes, system messages - open any on makerworld.com, mark all read) and a My models tab (your published designs with per-model downloads, likes, prints and comments). A headless service polls your Bambu Cloud account and notifies for new comments, replies, likes, followers, points, boost tokens, boost-token expiry, and download / like milestones. Unofficial - it uses the same endpoints the Bambu Handy app does, so you sign in once with the bundled makerworld-login helper.",
+  "description": "MakerWorld (Bambu Lab) activity in your Omarchy bar and as desktop notifications. A bar pill shows your point balance and unread badge, and turns your theme accent when something new arrives. The popup has an Activity tab and a My models tab (your designs with per-model stats). A headless service polls your Bambu Cloud account and notifies for new comments, likes, followers, points, and boost tokens. Unofficial: uses the Bambu Handy app's endpoints; sign in with the bundled helper.",
   "kinds": [
     "service",
     "bar-widget"
