@@ -106,6 +106,14 @@ This has no refresh token, so you'll repeat it whenever the token expires.
 bin/makerworld-token --check      # -> "token works - profile: <your name>"
 ```
 
+## Removing
+
+```sh
+omarchy plugin disable io.github.dreed47.makerworld   # take it off the bar / stop the service
+omarchy plugin remove io.github.dreed47.makerworld    # delete the plugin
+rm -rf ~/.config/omarchy/makerworld                   # optional: drop the stored token + config
+```
+
 ## Configuration
 
 Two layers, highest priority first:
