@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""Refresh the stored Bambu Cloud access token, non-interactively.
+
+Called by Service.qml when a poll comes back 401/403, and safe to run from
+cron or by hand. Reads token.json, exchanges the refresh token, writes the new
+pair back. Exit 0 on success, non-zero on any failure (Service.qml treats a
+non-zero exit as "sign-in expired, tell the user to run makerworld-login").
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _mwlib as mw  # noqa: E402
+
+
+def main() -> int:
+    tok = mw.load_token()
+    access = tok.get("accessToken", "")
+    refresh = tok.get("refreshToken", "")
+    region = mw.norm_region(tok.get("region", "global"))
+    if not refresh:
+        print("no refresh token stored - run makerworld-login", file=sys.stderr)
+        return 3
+
+    base = mw.api_base(region)
+    # Two body spellings have been seen; try camelCase first, then snake_case.
+    for payload in ({"refreshToken": refresh}, {"refresh_token": refresh}):
+        res = mw.http("POST", base + "/v1/user-service/user/refreshtoken",
+                      token=access or None, payload=payload)
+        obj = res.json() or {}
+        inner = mw.unwrap(obj) if isinstance(mw.unwrap(obj), dict) else {}
+        new_access = (obj.get("accessToken") or inner.get("accessToken")
+                      or obj.get("access_token") or inner.get("access_token"))
+        if res.status == 200 and new_access:
+            new_refresh = (obj.get("refreshToken") or inner.get("refreshToken")
+                           or obj.get("refresh_token") or inner.get("refresh_token")
+                           or refresh)
+            record = dict(tok)
+            record["accessToken"] = new_access
+            record["refreshToken"] = new_refresh
+            record["region"] = region
+            record["refreshedAt"] = int(time.time())
+            mw.save_token(record)
+            print(f"refreshed - expires {mw.exp_human(new_access)}")
+            return 0
+
+    print(f"refresh failed (HTTP {res.status}): {json.dumps(obj)[:500]}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

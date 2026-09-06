@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Sign in to Bambu Cloud and store a token for the MakerWorld plugin.
+
+Interactive. Handles the three login outcomes seen in the wild:
+
+  1. password login succeeds outright               -> tokens returned
+  2. account requires an emailed verification code  -> prompt, verify
+  3. account has TFA (authenticator) enabled        -> prompt tfaCode, verify
+
+The API is undocumented, so on any unexpected response the raw JSON is printed
+and you can fall back to `makerworld-token --paste` with a token grabbed from
+the browser dev tools (Authorization header on makerworld.com/api requests).
+
+Usage:
+  makerworld-login                 # prompts for everything
+  makerworld-login --region china  # .cn account
+"""
+
+from __future__ import annotations
+
+import argparse
+import getpass
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _mwlib as mw  # noqa: E402
+
+
+def _extract_tokens(obj: dict) -> dict | None:
+    d = obj if isinstance(obj, dict) else {}
+    inner = mw.unwrap(d) if isinstance(mw.unwrap(d), dict) else {}
+    for src in (d, inner):
+        at = src.get("accessToken") or src.get("access_token")
+        if at:
+            return {
+                "accessToken": at,
+                "refreshToken": src.get("refreshToken") or src.get("refresh_token") or "",
+                "expiresIn": src.get("expiresIn") or src.get("expires_in"),
+            }
+    return None
+
+
+def _needs_code(obj: dict) -> bool:
+    d = obj if isinstance(obj, dict) else {}
+    lt = str(d.get("loginType") or d.get("login_type") or "").lower()
+    return lt in ("verifycode", "verify_code", "email", "emailcode")
+
+
+def _tfa_key(obj: dict) -> str:
+    d = obj if isinstance(obj, dict) else {}
+    return d.get("tfaKey") or d.get("tfa_key") or ""
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Sign in to Bambu Cloud for the MakerWorld plugin.")
+    ap.add_argument("--region", choices=["global", "china"], help="account region (default: ask)")
+    ap.add_argument("--account", help="email or phone (default: ask)")
+    args = ap.parse_args()
+
+    region = args.region
+    if not region:
+        ans = input("Region [global/china] (default global): ").strip().lower()
+        region = "china" if ans in ("china", "cn") else "global"
+    region = mw.norm_region(region)
+    base = mw.api_base(region)
+
+    account = args.account or input("Bambu account (email or phone): ").strip()
+    if not account:
+        print("no account given", file=sys.stderr)
+        return 2
+    password = getpass.getpass("Password: ")
+
+    print(f"\nSigning in to {base} ...")
+    res = mw.http("POST", base + "/v1/user-service/user/login",
+                  payload={"account": account, "password": password, "apiError": ""})
+    obj = res.json() or {}
+
+    tokens = _extract_tokens(obj)
+
+    if not tokens and _tfa_key(obj):
+        key = _tfa_key(obj)
+        print("This account has two-factor authentication enabled.")
+        code = input("Authenticator (TFA) code: ").strip()
+        tres = mw.http("POST", mw.tfa_base(region) + "/api/sign-in/tfa",
+                       payload={"tfaKey": key, "tfaCode": code})
+        tobj = tres.json() or {}
+        tokens = _extract_tokens(tobj)
+        if not tokens:
+            # Some deployments return the token only as a Set-Cookie: token=...
+            cookie = str(tres.headers.get("Set-Cookie", ""))
+            for part in cookie.split(";"):
+                part = part.strip()
+                if part.lower().startswith("token="):
+                    tokens = {"accessToken": part[6:], "refreshToken": "", "expiresIn": None}
+                    break
+        if not tokens:
+            print("TFA verification did not return a token. Raw response:")
+            print(json.dumps(tobj, indent=2)[:2000])
+            return 1
+
+    if not tokens and _needs_code(obj):
+        print("A verification code has been emailed to you by Bambu Lab.")
+        # Best-effort re-trigger; harmless if the endpoint name is wrong.
+        try:
+            mw.http("POST", base + "/v1/user-service/user/sendemail/code",
+                    payload={"email": account, "type": "codeLogin"})
+        except SystemExit:
+            pass
+        code = input("Email verification code: ").strip()
+        vres = mw.http("POST", base + "/v1/user-service/user/login",
+                       payload={"account": account, "code": code})
+        vobj = vres.json() or {}
+        tokens = _extract_tokens(vobj)
+        if not tokens:
+            print("Code verification did not return a token. Raw response:")
+            print(json.dumps(vobj, indent=2)[:2000])
+            return 1
+
+    if not tokens:
+        print("Unexpected login response - no token and no known challenge:")
+        print(json.dumps(obj, indent=2)[:2000])
+        print("\nYou can still use:  makerworld-token --paste  (token from browser dev tools)")
+        return 1
+
+    record = {
+        "accessToken": tokens["accessToken"],
+        "refreshToken": tokens.get("refreshToken", ""),
+        "region": region,
+        "account": account,
+    }
+    mw.save_token(record)
+    if mw.scaffold_config():
+        print(f"Wrote default config      {mw.CONFIG_FILE}")
+    print(f"Saved token               {mw.TOKEN_FILE}")
+    print(f"  access token            {mw.mask(record['accessToken'])}")
+    print(f"  expires                 {mw.exp_human(record['accessToken'])}")
+    print(f"  refresh token           {'yes' if record['refreshToken'] else 'NO (will need re-login when it expires)'}")
+    print("\nEnable the MakerWorld plugin in Omarchy (or restart omarchy-shell) to start polling.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

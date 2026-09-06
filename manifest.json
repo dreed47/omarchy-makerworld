@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.dreed47.makerworld",
+  "name": "MakerWorld",
+  "version": "0.1.0",
+  "author": "David Reed",
+  "license": "MIT",
+  "description": "Desktop notifications for MakerWorld (Bambu Lab) account activity: new comments and replies, likes, new followers, system messages, and point-balance increases on your models. A headless service polls the Bambu Cloud account API on an interval and raises an omarchy notification for anything new; clicking it opens the model page. Unofficial - it uses the same endpoints the Bambu Handy app does, so you sign in once with the bundled makerworld-login helper. This first release is notifications only; a bar pill with the point balance and unread count is planned next.",
+  "kinds": [
+    "service"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}

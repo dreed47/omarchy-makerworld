@@ -1,0 +1,12 @@
+{
+  "region": "global",
+  "pollSeconds": 300,
+  "profileMinutes": 15,
+  "notify": true,
+  "notifyTypes": ["comment", "reply", "like", "follow", "system", "points"],
+  "notifyTimeoutSeconds": 0,
+  "notifySound": "",
+  "maxBurst": 5,
+  "openOnClick": true,
+  "debug": false
+}

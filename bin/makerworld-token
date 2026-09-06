@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Inspect or set the MakerWorld plugin's stored Bambu Cloud token.
+
+  makerworld-token                 # show status (default)
+  makerworld-token --status
+  makerworld-token --path          # print the token.json path
+  makerworld-token --check         # hit /my/profile, exit 0 if the token works
+  makerworld-token --paste [--region global|china] [--refresh-token RT]
+                                   # store a token pasted from browser dev tools
+"""
+
+from __future__ import annotations
+
+import argparse
+import getpass
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _mwlib as mw  # noqa: E402
+
+
+def show_status() -> int:
+    tok = mw.load_token()
+    if not tok.get("accessToken"):
+        print(f"No token stored at {mw.TOKEN_FILE}")
+        print("Run: makerworld-login")
+        return 1
+    print(f"token file     {mw.TOKEN_FILE}")
+    print(f"account        {tok.get('account', '(unknown)')}")
+    print(f"region         {mw.norm_region(tok.get('region', 'global'))}")
+    print(f"access token   {mw.mask(tok.get('accessToken', ''))}")
+    print(f"expires        {mw.exp_human(tok.get('accessToken', ''))}")
+    print(f"refresh token  {'present' if tok.get('refreshToken') else 'MISSING (re-login needed at expiry)'}")
+    return 0
+
+
+def check() -> int:
+    tok = mw.load_token()
+    access = tok.get("accessToken", "")
+    if not access:
+        print("no token stored", file=sys.stderr)
+        return 1
+    region = mw.norm_region(tok.get("region", "global"))
+    res = mw.http("GET", mw.api_base(region) + "/v1/design-user-service/my/profile", token=access)
+    if res.status == 200:
+        d = mw.unwrap(res.json()) or {}
+        name = d.get("name") or d.get("nickName") or d.get("uid") or "ok"
+        print(f"token works - profile: {name}")
+        return 0
+    print(f"token check failed: HTTP {res.status} {res.body[:300]!r}", file=sys.stderr)
+    return 1
+
+
+def paste(region: str, refresh_token: str) -> int:
+    print("Paste the Bearer token (the part after 'Bearer ' in the Authorization")
+    print("header of a makerworld.com/api request in browser dev tools):")
+    token = getpass.getpass("token: ").strip()
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+    if not token:
+        print("nothing pasted", file=sys.stderr)
+        return 2
+    record = mw.load_token()
+    record["accessToken"] = token
+    record["region"] = mw.norm_region(region or record.get("region", "global"))
+    if refresh_token:
+        record["refreshToken"] = refresh_token
+    record.setdefault("refreshToken", record.get("refreshToken", ""))
+    record.setdefault("account", record.get("account", "(pasted)"))
+    mw.save_token(record)
+    mw.scaffold_config()
+    print(f"stored - expires {mw.exp_human(token)}")
+    if not record.get("refreshToken"):
+        print("note: no refresh token - you'll re-run this when the token expires")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--status", action="store_true", help="show token status (default)")
+    g.add_argument("--path", action="store_true", help="print token.json path")
+    g.add_argument("--check", action="store_true", help="verify the token against /my/profile")
+    g.add_argument("--paste", action="store_true", help="store a manually pasted token")
+    ap.add_argument("--region", choices=["global", "china"], help="with --paste")
+    ap.add_argument("--refresh-token", default="", help="with --paste, optional")
+    args = ap.parse_args()
+
+    if args.path:
+        print(mw.TOKEN_FILE)
+        return 0
+    if args.check:
+        return check()
+    if args.paste:
+        return paste(args.region, args.refresh_token)
+    return show_status()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
