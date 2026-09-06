@@ -374,6 +374,84 @@ test("parsePoints digs through common shapes", () => {
   assert.equal(M.parsePoints({ nothing: 1 }), null);
 });
 
+// ---- followers + boost tokens (real /my/profile shape) -----------
+
+const PROFILE = {
+  name: "dreed10", handle: "dreed10", uid: 654298191,
+  point: 7841, pointRegular: 4469, pointExclusive: 3372.8,
+  boost: 0, boostGained: 207, fanCount: 194, followCount: 1,
+};
+
+test("parse profile: name, handle, followers, boost", () => {
+  assert.equal(M.parseProfileName(PROFILE), "dreed10");
+  assert.equal(M.parseProfileHandle(PROFILE), "dreed10");
+  assert.equal(M.parseFollowerCount(PROFILE), 194);
+  assert.equal(M.parseBoostCount(PROFILE), 0, "0 tokens is a value, not null");
+  assert.equal(M.parseBoostCount({ nope: 1 }), null);
+  assert.equal(M.parseFollowerCount({ nope: 1 }), null);
+});
+
+test("followersUrl / boostPageUrl", () => {
+  assert.equal(M.followersUrl("global", "dreed10"), "https://makerworld.com/en/@dreed10");
+  assert.equal(M.followersUrl("global", ""), "https://makerworld.com/en/my/notification");
+  assert.match(M.boostPageUrl("global"), /makerworld\.com\/en\//);
+});
+
+test("boostExpirySoonest: soonest future expiry, ignores past", () => {
+  const now = Date.parse("2026-09-06T00:00:00Z");
+  const msgs = [
+    { pointBoostingRightGet: { boostingRightId: 1, expireAt: "2026-08-01T00:00:00Z" } }, // past
+    { pointBoostingRightExpireRemind: { boostingRightId: 2, expireAt: "2026-09-20T00:00:00Z" } },
+    { pointBoostingRightExpireRemind: { boostingRightId: 3, expireAt: "2026-09-10T00:00:00Z" } }, // soonest
+    { designCommented: {} },
+  ];
+  const s = M.boostExpirySoonest(msgs, now);
+  assert.equal(s.rightId, "3");
+  assert.equal(s.iso, "2026-09-10T00:00:00Z");
+  assert.equal(M.boostExpirySoonest([{ pointBoostingRightGet: { expireAt: "2020-01-01T00:00:00Z" } }], now), null);
+  assert.equal(M.boostExpirySoonest([], now), null);
+});
+
+test("formatMessage: boost-expiry reminder, grant, badge", () => {
+  const now = Date.parse("2026-09-06T00:00:00Z");
+  const remind = M.formatMessage({
+    id: 9, type: 502, createTime: "2026-09-06T00:00:00Z",
+    pointBoostingRightExpireRemind: { boostingRightId: 3, expireAt: "2026-09-10T00:00:00Z", earnReason: "plan" },
+  }, "global");
+  assert.equal(remind.cls, "points");
+  assert.equal(remind.title, "Boost token expiring");
+  assert.match(remind.body, /2026-09-10/);
+  assert.match(remind.url, /boost/);
+
+  const grant = M.formatMessage({
+    id: 8, type: 501, pointBoostingRightGet: { boostingRightId: 3, expireAt: "2026-10-01T00:00:00Z" },
+  }, "global");
+  assert.equal(grant.cls, "points");
+  assert.match(grant.body, /boost token/i);
+
+  const badge = M.formatMessage({
+    id: 7, type: 815, newBadgeReceived: { badgeTitle: "MakerWorld Guardian" },
+  }, "global");
+  assert.equal(badge.cls, "system");
+  assert.match(badge.body, /MakerWorld Guardian/);
+});
+
+test("untilTime / isoDate", () => {
+  const now = 1_000_000_000_000;
+  assert.equal(M.untilTime(now + 3 * 86400 * 1000, now), "in 3 days");
+  assert.equal(M.untilTime(now + 5 * 3600 * 1000, now), "in 5 hours");
+  assert.equal(M.untilTime(now - 1000, now), "now");
+  assert.equal(M.isoDate("2026-09-10T00:00:00Z"), "2026-09-10");
+  assert.equal(M.isoDate("garbage"), "");
+});
+
+test("normalizedConfig: boostExpiryWarnDays clamp", () => {
+  assert.equal(M.normalizedConfig({ boostExpiryWarnDays: 99 }).boostExpiryWarnDays, 30);
+  assert.equal(M.normalizedConfig({ boostExpiryWarnDays: -3 }).boostExpiryWarnDays, 0);
+  assert.equal(M.normalizedConfig({ boostExpiryWarnDays: "7" }).boostExpiryWarnDays, 7);
+  assert.equal(M.normalizedConfig(null).boostExpiryWarnDays, 5);
+});
+
 // ---- misc ----------------------------------------------------
 
 test("splitHttp separates body and status", () => {

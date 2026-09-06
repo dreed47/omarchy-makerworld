@@ -146,6 +146,7 @@ var DEFAULT_CONFIG = {
   maxBurst: 5,
   openOnClick: true,
   showPoints: true,
+  boostExpiryWarnDays: 5,
   debug: false
 };
 
@@ -208,6 +209,9 @@ function normalizedConfig(raw) {
   if (src.maxBurst !== undefined) c.maxBurst = Math.max(1, Math.min(20, parseInt(src.maxBurst, 10) || 5));
   if (src.openOnClick !== undefined) c.openOnClick = truthy(src.openOnClick, true);
   if (src.showPoints !== undefined) c.showPoints = truthy(src.showPoints, true);
+  if (src.boostExpiryWarnDays !== undefined) {
+    c.boostExpiryWarnDays = Math.max(0, Math.min(30, parseInt(src.boostExpiryWarnDays, 10) || 5));
+  }
   if (src.debug !== undefined) c.debug = truthy(src.debug, false);
   return c;
 }
@@ -456,8 +460,9 @@ var EVENT_CLASS = {
   254: "other",                                          // instanceRatingRemind (a nag - hide by default)
   301: "follow", 302: "follow", 303: "follow",           // (new follower - unconfirmed)
   401: "system", 402: "system", 411: "system", 412: "system",
-  501: "points", 502: "points", 503: "points",           // boost token / design boosted
-  601: "like", 602: "like", 603: "like"                  // community liked
+  501: "points", 502: "points", 503: "points",           // boost granted / expiry remind / design boosted
+  601: "like", 602: "like", 603: "like",                 // community liked
+  815: "system"                                          // newBadgeReceived
 };
 
 // Classify a raw message (envelope with a nested payload) into a KNOWN_TYPE
@@ -530,11 +535,6 @@ function formatMessage(m, region) {
     text = "Rate the model you printed" + (designTitle ? ": “" + designTitle + "”" : "");
   } else if (p.key === "designPublished") {
     text = "Your design is now live" + (designTitle ? ": “" + designTitle + "”" : "");
-  } else if (cls === "system") {
-    var st = deepFindStr(pv, ["title"]);
-    var sb = deepFindStr(pv, ["bio"]);
-    text = st + ((sb && sb !== st) ? " — " + sb : "");
-    if (!text) text = stripHtml(deepFindStr(pv, ["content", "newContent", "detail"]));
   } else if (p.key === "pointDesignBoosted") {
     var cnt = pv.designBoostCnt;
     text = (actor ? actor + " boosted" : "Boost received")
@@ -542,6 +542,17 @@ function formatMessage(m, region) {
       + (cnt ? " (" + cnt + " total)" : "");
   } else if (p.key === "pointBoostingRightGet") {
     text = "You received a boost token";
+  } else if (p.key === "pointBoostingRightExpireRemind") {
+    var exp = messageTs({ createTime: pv.expireAt });
+    text = "A boost token expires " + untilTime(exp, Date.now())
+      + (exp ? " (" + isoDate(pv.expireAt) + ")" : "") + " — use it before it's gone";
+  } else if (p.key === "newBadgeReceived") {
+    text = "New badge: " + (pv.badgeTitle || "unlocked");
+  } else if (cls === "system") {
+    var st = deepFindStr(pv, ["title"]);
+    var sb = deepFindStr(pv, ["bio"]);
+    text = st + ((sb && sb !== st) ? " — " + sb : "");
+    if (!text) text = stripHtml(deepFindStr(pv, ["content", "newContent", "detail"]));
   } else if (cls === "reply") {
     // Prefer the newest reply body over the original comment it answers.
     text = stripHtml(
@@ -561,13 +572,19 @@ function formatMessage(m, region) {
   body = stripHtml(body);
   if (body.length > 240) body = body.slice(0, 237) + "…";
 
+  var url = design ? modelUrl(region, design.id)
+    : (p.key.indexOf("pointBoosting") === 0 || p.key === "pointDesignBoosted")
+      ? boostPageUrl(region)
+      : messagesPageUrl(region);
+
   return {
     id: messageId(m),
     ts: messageTs(m),
     cls: cls,
-    title: CLASS_TITLE[cls] || CLASS_TITLE.other,
+    title: p.key === "pointBoostingRightExpireRemind" ? "Boost token expiring"
+      : (CLASS_TITLE[cls] || CLASS_TITLE.other),
     body: body || (CLASS_TITLE[cls] || "New activity on MakerWorld"),
-    url: design ? modelUrl(region, design.id) : messagesPageUrl(region),
+    url: url,
     read: !!(m && (m.isread || m.isRead))
   };
 }
@@ -647,6 +664,63 @@ function parseProfileName(json) {
   return v === undefined ? "" : String(v);
 }
 
+// URL handle from /my/profile (for building the followers page link).
+function parseProfileHandle(json) {
+  var d = unwrap(json) || {};
+  var v = firstDefined(d, ["handle", "uidStr"]);
+  if (v === undefined && d.user) v = firstDefined(d.user, ["handle"]);
+  return v === undefined ? "" : String(v);
+}
+
+// Follower ("fans") count from /my/profile. Number or null.
+function parseFollowerCount(json) {
+  var d = unwrap(json) || {};
+  var v = firstDefined(d, ["fanCount", "fansCount", "followerCount", "followersCount"]);
+  if (v === undefined) return null;
+  var n = parseInt(v, 10);
+  return isNaN(n) ? null : n;
+}
+
+// Currently-available boost tokens from /my/profile. Number or null.
+// (`boostGained` is the lifetime total - not this.)
+function parseBoostCount(json) {
+  var d = unwrap(json) || {};
+  var v = firstDefined(d, ["boost", "boostCount", "boostToken", "boostTokens", "boostAvailable", "availableBoost"]);
+  if (v === undefined) return null;
+  var n = parseInt(v, 10);
+  return isNaN(n) ? null : n;
+}
+
+function followersUrl(region, handle) {
+  var h = String(handle || "").replace(/^@/, "");
+  return h !== "" ? (siteBase(region) + "/en/@" + h) : (siteBase(region) + "/en/my/notification");
+}
+
+function boostPageUrl(region) {
+  return siteBase(region) + "/en/my/creator-center/boost";
+}
+
+// Scan raw notification messages for boost-token expiry info and return the
+// soonest *future* expiry: { ms, iso, rightId } or null. Uses both the
+// dedicated "expire remind" message and the original "granted" message.
+function boostExpirySoonest(rawList, nowMs) {
+  var now = nowMs || Date.now();
+  var best = null;
+  var list = rawList || [];
+  for (var i = 0; i < list.length; i++) {
+    var m = list[i];
+    var pv = null, rid = null;
+    if (m && m.pointBoostingRightExpireRemind) { pv = m.pointBoostingRightExpireRemind; }
+    else if (m && m.pointBoostingRightGet) { pv = m.pointBoostingRightGet; }
+    if (!pv || !pv.expireAt) continue;
+    var ms = Date.parse(String(pv.expireAt));
+    if (isNaN(ms) || ms <= now) continue;
+    rid = pv.boostingRightId !== undefined ? String(pv.boostingRightId) : String(ms);
+    if (!best || ms < best.ms) best = { ms: ms, iso: String(pv.expireAt), rightId: rid };
+  }
+  return best;
+}
+
 // ---- Bar-pill / panel display helpers ------------------------
 
 // Group digits with thousands separators: 1240 -> "1,240".
@@ -697,6 +771,23 @@ function relTime(tsMs, nowMs) {
   if (h < 24) return h + "h ago";
   var d = Math.floor(h / 24);
   return d + "d ago";
+}
+
+// "in 3 days" / "in 5 hours" / "soon" for a future timestamp.
+function untilTime(tsMs, nowMs) {
+  var s = Math.floor((tsMs - (nowMs || Date.now())) / 1000);
+  if (s <= 0) return "now";
+  if (s < 3600) return "in " + Math.max(1, Math.round(s / 60)) + " minutes";
+  var h = Math.round(s / 3600);
+  if (h < 48) return h <= 1 ? "in about an hour" : "in " + h + " hours";
+  return "in " + Math.round(h / 24) + " days";
+}
+
+// "2026-06-01" from an ISO timestamp; "" if unparseable.
+function isoDate(iso) {
+  var s = String(iso || "");
+  var m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : "";
 }
 
 // Split a `curl -w '\n__HTTP__%{http_code}'` stdout blob into body + status.
@@ -751,6 +842,14 @@ if (typeof module !== "undefined") {
     mergeSeen: mergeSeen,
     parsePoints: parsePoints,
     parseProfileName: parseProfileName,
+    parseProfileHandle: parseProfileHandle,
+    parseFollowerCount: parseFollowerCount,
+    parseBoostCount: parseBoostCount,
+    followersUrl: followersUrl,
+    boostPageUrl: boostPageUrl,
+    boostExpirySoonest: boostExpirySoonest,
+    untilTime: untilTime,
+    isoDate: isoDate,
     groupNum: groupNum,
     unreadTotalOf: unreadTotalOf,
     unreadChips: unreadChips,

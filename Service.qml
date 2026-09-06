@@ -122,13 +122,17 @@ Item {
   readonly property int pollMs: Math.max(120, cfg.pollSeconds || 300) * 1000
   readonly property int profileMs: Math.max(5, cfg.profileMinutes || 15) * 60 * 1000
   readonly property bool notifyPoints: cfg.notify && notifyTypes.indexOf("points") !== -1
+  readonly property bool notifyFollows: cfg.notify && notifyTypes.indexOf("follow") !== -1
 
   // ---- Live state the bar pill / popup read -----------------------
   property var unreadByType: ({})
   property int unreadTotal: 0
   property int apiUnreadTotal: 0   // API grand total (mostly print jobs); debug only
   property double points: -1
+  property int followerCount: -1
+  property int boostTokens: -1
   property string profileName: ""
+  property string profileHandle: ""
   // "init" | "ok" | "expired" | "notoken"
   property string connState: "init"
 
@@ -140,6 +144,9 @@ Item {
     property double lastTotal: -1
     property string seenIdsJson: "[]"    // ring buffer of notified message ids
     property double lastPoints: -1
+    property double lastFanCount: -1
+    property double lastBoostCount: -1
+    property string boostWarnedId: ""    // boostingRightId we've already warned about
     property bool baselined: false
   }
 
@@ -308,20 +315,89 @@ Item {
   function handleProfile(json) {
     var name = Model.parseProfileName(json)
     if (name !== "") root.profileName = name
+    var handle = Model.parseProfileHandle(json)
+    if (handle !== "") root.profileHandle = handle
 
     var pts = Model.parsePoints(json)
-    if (pts === null) return
-    root.points = pts
-    root.connState = "ok"
-
-    if (root.notifyPoints && state.lastPoints >= 0 && pts > state.lastPoints) {
-      var delta = pts - state.lastPoints
-      root.enqueueNotify("MakerWorld points",
-        "+" + delta + "  (balance " + Model.groupNum(pts) + ")",
-        Model.glyphFor("points"),
-        Model.siteBase(root.region) + "/en/my/points")
+    if (pts !== null) {
+      root.points = pts
+      root.connState = "ok"
+      if (root.notifyPoints && state.lastPoints >= 0 && pts > state.lastPoints) {
+        var delta = pts - state.lastPoints
+        root.enqueueNotify("MakerWorld points",
+          "+" + delta + "  (balance " + Model.groupNum(pts) + ")",
+          Model.glyphFor("points"),
+          Model.siteBase(root.region) + "/en/my/points")
+      }
+      state.lastPoints = pts
     }
-    state.lastPoints = pts
+
+    // ---- Follower alerts (diff fanCount) ----
+    var fans = Model.parseFollowerCount(json)
+    if (fans !== null) {
+      root.followerCount = fans
+      if (root.notifyFollows && state.lastFanCount >= 0 && fans > state.lastFanCount) {
+        var gained = fans - state.lastFanCount
+        root.enqueueNotify(
+          gained === 1 ? "New follower" : gained + " new followers",
+          "You now have " + Model.groupNum(fans) + " followers on MakerWorld",
+          Model.glyphFor("follow"),
+          Model.followersUrl(root.region, root.profileHandle))
+      }
+      state.lastFanCount = fans
+    }
+
+    // ---- Boost tokens: count change + expiry warning ----
+    var boost = Model.parseBoostCount(json)
+    if (boost !== null) {
+      root.boostTokens = boost
+      if (root.notifyPoints && state.lastBoostCount >= 0 && boost > state.lastBoostCount) {
+        root.enqueueNotify(
+          boost === 1 ? "Boost token available" : boost + " boost tokens available",
+          "Spend it on a design before it expires",
+          Model.glyphFor("points"), Model.boostPageUrl(root.region))
+      }
+      if (boost !== state.lastBoostCount) state.boostWarnedId = ""   // fresh token can warn again
+      state.lastBoostCount = boost
+      if (boost > 0 && root.notifyPoints && cfg.boostExpiryWarnDays > 0)
+        Qt.callLater(root.checkBoostExpiry)
+    }
+  }
+
+  // ---- Boost-token expiry warning -------------------------------
+  //
+  // MakerWorld sends a `pointBoostingRightExpireRemind` message ~a week out;
+  // we also read the original grant's `expireAt`. When a token is within the
+  // warn window and we have not warned about that boostingRightId yet, fire
+  // one notification. Only runs while `boost > 0`.
+  function checkBoostExpiry() {
+    if (!canPoll || boostProc.running) return
+    boostProc.command = curlArgs(Model.urlMessages(root.region, 50, 0, 3))
+    boostProc.running = true
+  }
+
+  Process {
+    id: boostProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var r = Model.splitHttp(text)
+        if (r.status < 200 || r.status >= 300 || r.body === "") return
+        try {
+          var list = Model.extractMessages(JSON.parse(r.body))
+          var soon = Model.boostExpirySoonest(list, Date.now())
+          if (!soon) return
+          var daysMs = cfg.boostExpiryWarnDays * 86400 * 1000
+          if ((soon.ms - Date.now()) > daysMs) return
+          if (String(soon.rightId) === state.boostWarnedId) return
+          root.enqueueNotify("Boost token expiring",
+            "A boost token expires " + Model.untilTime(soon.ms, Date.now())
+              + " (" + Model.isoDate(soon.iso) + ") - use it before it's gone",
+            Model.glyphFor("points"), Model.boostPageUrl(root.region))
+          state.boostWarnedId = String(soon.rightId)
+        } catch (e) { root.dbg("boost expiry parse error", e) }
+      }
+    }
   }
 
   // ---- Mark all read (called by the popup) -----------------------
@@ -456,7 +532,11 @@ Item {
         unreadByType: root.unreadByType,
         apiUnreadTotal: root.apiUnreadTotal,
         points: root.points,
+        followerCount: root.followerCount,
+        boostTokens: root.boostTokens,
         profileName: root.profileName,
+        profileHandle: root.profileHandle,
+        boostWarnedId: state.boostWarnedId,
         notify: root.cfg.notify,
         notifyTypes: root.notifyTypes
       })

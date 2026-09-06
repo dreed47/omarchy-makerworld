@@ -32,6 +32,8 @@ Panel {
   readonly property string region: svc ? String(svc.region || "global") : "global"
   readonly property string accessToken: svc ? String(svc.accessToken || "") : ""
   readonly property real points: svc ? svc.points : -1
+  readonly property int followerCount: svc ? svc.followerCount : -1
+  readonly property int boostTokens: svc ? svc.boostTokens : -1
   readonly property var unreadByType: svc ? svc.unreadByType : ({})
   readonly property int unreadTotal: svc ? svc.unreadTotal : 0
   readonly property string connState: svc ? String(svc.connState || "init") : "init"
@@ -65,7 +67,12 @@ Panel {
     if (connState === "notoken")
       return ["MakerWorld not signed in", "Run  makerworld-login  in a terminal."]
     var out = ["MakerWorld" + (profileName !== "" ? " — " + profileName : "")]
-    if (points >= 0) out.push("Points: " + Model.groupNum(points))
+    if (points >= 0) {
+      var pl = "Points: " + Model.groupNum(points)
+      if (boostTokens > 0) pl += "   Boost tokens: " + boostTokens
+      out.push(pl)
+    }
+    if (followerCount >= 0) out.push("Followers: " + Model.groupNum(followerCount))
     var chips = Model.unreadChips(unreadByType)
     if (chips.length) {
       var bits = chips.map(function (c) { return c.count + " " + c.label })
@@ -380,6 +387,27 @@ Panel {
                 font.family: root.mono
                 font.pixelSize: Style.font.caption
                 font.letterSpacing: 1
+              }
+            }
+            Item { width: Style.space(4); height: 1 }
+            // boost tokens + follower count, when known
+            Column {
+              anchors.verticalCenter: parent.verticalCenter
+              visible: root.boostTokens > 0 || root.followerCount >= 0
+              Text {
+                visible: root.boostTokens > 0
+                text: String.fromCharCode(0xf0e7) + "  " + root.boostTokens
+                  + (root.boostTokens === 1 ? " boost token" : " boost tokens")
+                color: root.fg
+                font.family: root.mono
+                font.pixelSize: Style.font.caption
+              }
+              Text {
+                visible: root.followerCount >= 0
+                text: Model.glyphFor("follow") + "  " + Model.groupNum(root.followerCount) + " followers"
+                color: root.dim
+                font.family: root.mono
+                font.pixelSize: Style.font.caption
               }
             }
           }

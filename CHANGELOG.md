@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Follower alerts** — the profile poll now tracks `fanCount`; a rise fires a
+  "N new followers" notification (gated by the `follow` notify type). This is
+  the follow path, since no message-API category surfaces new followers.
+- **Boost-token expiry warnings** — when you hold a boost token, the service
+  reads MakerWorld's own `pointBoostingRightExpireRemind` message (and the
+  grant's `expireAt`) and warns once, `boostExpiryWarnDays` (default 5) before
+  it lapses. Also notifies when a new boost token becomes available. Both
+  gated by the `points` notify type; dormant while you have zero tokens.
+- Popup shows boost-token count and follower count next to the points hero;
+  right-click status notification includes them.
+- Parses `newBadgeReceived` messages ("New badge: …") and links boost/points
+  messages to the creator-center boost page.
+
 - `makerworld-login --from-slicer` — import an existing Bambu Cloud token from
   a signed-in Bambu Studio / Orca Slicer config, skipping the password. Also
   offered automatically by bare `makerworld-login` when a slicer config is

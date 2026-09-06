@@ -8,5 +8,7 @@
   "notifySound": "",
   "maxBurst": 5,
   "openOnClick": true,
+  "showPoints": true,
+  "boostExpiryWarnDays": 5,
   "debug": false
 }
