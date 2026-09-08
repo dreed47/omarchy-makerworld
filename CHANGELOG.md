@@ -2,6 +2,13 @@
 
 ## 0.3.0 — unreleased
 
+- **Self-update check** — the service reads its own `manifest.json` version and,
+  every `updateCheckHours` (default 12), fetches `manifest.json` from the repo's
+  default branch to compare. When a newer version is out, the popup shows an
+  "Update available: vX.Y.Z" banner with an Update button (runs
+  `omarchy plugin update`) and a link to the release notes. `checkForUpdates`
+  opts out of the periodic GitHub request.
+
 - Security review follow-up: every network call now enforces a response-size
   cap and refuses redirects on the bearer-token request. QML `curl` fetches
   pass `--max-filesize` / `--max-redirs 0` and the collectors drop an over-cap

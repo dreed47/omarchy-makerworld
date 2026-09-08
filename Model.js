@@ -149,6 +149,8 @@ var DEFAULT_CONFIG = {
   showPoints: true,
   boostExpiryWarnDays: 5,
   notifyMilestones: true,
+  checkForUpdates: true,
+  updateCheckHours: 12,
   debug: false
 };
 
@@ -215,6 +217,12 @@ function normalizedConfig(raw) {
     c.boostExpiryWarnDays = Math.max(0, Math.min(30, parseInt(src.boostExpiryWarnDays, 10) || 5));
   }
   if (src.notifyMilestones !== undefined) c.notifyMilestones = truthy(src.notifyMilestones, true);
+  if (src.checkForUpdates !== undefined) c.checkForUpdates = truthy(src.checkForUpdates, true);
+  if (src.updateCheckHours !== undefined) {
+    var uh = parseInt(src.updateCheckHours, 10);
+    if (isNaN(uh)) uh = 12;
+    c.updateCheckHours = Math.max(1, Math.min(168, uh));
+  }
   if (src.debug !== undefined) c.debug = truthy(src.debug, false);
   return c;
 }
@@ -707,6 +715,44 @@ function myModelsUrl(region) {
   return siteBase(region) + "/en/my/models";
 }
 
+// ---- Plugin self-update check -----------------------------------
+
+// This plugin's own GitHub repo. Fork -> change this one line.
+var REPO_SLUG = "dreed47/omarchy-makerworld";
+var REPO_BRANCH = "master";
+
+function rawManifestUrl() {
+  return "https://raw.githubusercontent.com/" + REPO_SLUG + "/" + REPO_BRANCH + "/manifest.json";
+}
+
+function releasesUrl() {
+  return "https://github.com/" + REPO_SLUG + "/releases";
+}
+
+// "v1.2.3" / "1.2.3-beta" -> [1, 2, 3]; junk -> null.
+function parseVersion(str) {
+  var m = String(str || "").trim().replace(/^v/i, "").match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  if (!m) return null;
+  return [parseInt(m[1], 10) || 0, parseInt(m[2], 10) || 0, parseInt(m[3], 10) || 0];
+}
+
+// -1 / 0 / 1 like a comparator. Unparseable versions compare as equal (0), so
+// a bad remote read never shows a phantom update.
+function versionCmp(a, b) {
+  var pa = parseVersion(a), pb = parseVersion(b);
+  if (!pa || !pb) return 0;
+  for (var i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1;
+  }
+  return 0;
+}
+
+// Pull the `version` string out of a fetched manifest.json.
+function manifestVersion(json) {
+  var d = (json && typeof json === "object") ? json : {};
+  return typeof d.version === "string" ? d.version.trim() : "";
+}
+
 // ---- "My models" tab -------------------------------------------
 //
 // GET /v1/design-service/my/design/published?limit=&offset= -> { total, hits:[...] }.
@@ -975,6 +1021,11 @@ if (typeof module !== "undefined") {
     groupNum: groupNum,
     unreadTotalOf: unreadTotalOf,
     riseOver: riseOver,
+    rawManifestUrl: rawManifestUrl,
+    releasesUrl: releasesUrl,
+    parseVersion: parseVersion,
+    versionCmp: versionCmp,
+    manifestVersion: manifestVersion,
     unreadChips: unreadChips,
     relTime: relTime,
     splitHttp: splitHttp

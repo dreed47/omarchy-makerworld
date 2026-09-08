@@ -208,7 +208,74 @@ Item {
     property double seenUnread: -1       // pill "new" baseline (cleared on popup open)
     property double seenPoints: -1
     property double seenFans: -1
+    property string latestVersion: ""    // newest version seen on GitHub
+    property double updateCheckedAt: 0   // epoch ms of the last update check
     property bool baselined: false
+  }
+
+  // ---- Self-update check --------------------------------------
+  //
+  // Reads this plugin's own manifest.json for the installed version, and once
+  // every `updateCheckHours` fetches manifest.json from the repo's default
+  // branch to see if a newer one is out. `checkForUpdates` opts out (it pings
+  // GitHub on a schedule). The popup's Update button shells out to
+  // `omarchy plugin update`, which owns the git pull + reload.
+  property string installedVersion: ""
+  readonly property string latestVersion: state.latestVersion !== "" ? state.latestVersion : installedVersion
+  readonly property bool updateAvailable: Model.versionCmp(latestVersion, installedVersion) > 0
+  readonly property string updateUrl: Model.releasesUrl()
+  readonly property int updateCheckMs: Math.max(1, cfg.updateCheckHours || 12) * 3600 * 1000
+
+  FileView {
+    path: root.pluginDir + "manifest.json"
+    printErrors: false
+    onLoaded: {
+      try { root.installedVersion = Model.manifestVersion(JSON.parse(text())) }
+      catch (e) { root.installedVersion = "" }
+    }
+  }
+
+  function maybeCheckUpdate(force) {
+    if (!cfg.checkForUpdates || updateCheckProc.running) return
+    if (!force && (Date.now() - (state.updateCheckedAt || 0)) < root.updateCheckMs - 60000) return
+    updateCheckProc.command = ["curl", "-sS", "--max-time", "15",
+      "--max-filesize", "200000", "--max-redirs", "0",
+      "-H", "Accept: application/json",
+      "-w", "\n__HTTP__%{http_code}", Model.rawManifestUrl()]
+    updateCheckProc.running = true
+  }
+
+  Process {
+    id: updateCheckProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (root.bodyTooBig(text)) return
+        var r = Model.splitHttp(text)
+        if (r.status < 200 || r.status >= 300 || r.body === "") return
+        try {
+          var v = Model.manifestVersion(JSON.parse(r.body))
+          if (Model.parseVersion(v)) {
+            state.latestVersion = v
+            state.updateCheckedAt = Date.now()
+            root.dbg("update check", "latest " + v + " installed " + root.installedVersion)
+          }
+        } catch (e) { root.dbg("update check parse error", e) }
+      }
+    }
+  }
+
+  function runUpdate() {
+    Quickshell.execDetached(["omarchy", "plugin", "update", root.pluginId])
+  }
+
+  Timer {
+    id: updateTimer
+    interval: root.updateCheckMs
+    running: root.cfg.checkForUpdates === true
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.maybeCheckUpdate(false)
   }
 
   function seenIds() {
@@ -628,10 +695,15 @@ Item {
     // Drop the baseline so the next poll re-seeds without notifying, then poll.
     function poll(): void { root.resetBaselineAndPoll() }
     function markRead(): void { root.markAllRead() }
+    function checkUpdate(): void { root.maybeCheckUpdate(true) }
+    function update(): void { root.runUpdate() }
     function status(): string {
       return JSON.stringify({
         connState: root.connState,
         region: root.region,
+        installedVersion: root.installedVersion,
+        latestVersion: root.latestVersion,
+        updateAvailable: root.updateAvailable,
         canPoll: root.canPoll,
         baselined: state.baselined,
         unreadTotal: root.unreadTotal,

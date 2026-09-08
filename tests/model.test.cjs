@@ -495,6 +495,38 @@ test("normalizedConfig: notifyMilestones", () => {
   assert.equal(M.normalizedConfig(null).notifyMilestones, true);
 });
 
+// ---- self-update check --------------------------------------
+
+test("parseVersion / versionCmp", () => {
+  assert.deepEqual(M.parseVersion("v1.2.3"), [1, 2, 3]);
+  assert.deepEqual(M.parseVersion("0.3"), [0, 3, 0]);
+  assert.deepEqual(M.parseVersion("2.0.0-beta.1"), [2, 0, 0]);
+  assert.equal(M.parseVersion("garbage"), null);
+
+  assert.equal(M.versionCmp("0.3.1", "0.3.0"), 1, "newer");
+  assert.equal(M.versionCmp("0.3.0", "0.3.0"), 0, "same");
+  assert.equal(M.versionCmp("v0.3.0", "0.3.0"), 0, "v-prefix ignored");
+  assert.equal(M.versionCmp("0.2.9", "0.3.0"), -1, "older");
+  assert.equal(M.versionCmp("1.0", "0.9.9"), 1);
+  assert.equal(M.versionCmp("weird", "0.3.0"), 0, "unparseable -> equal, never a phantom update");
+});
+
+test("manifestVersion + repo URLs", () => {
+  assert.equal(M.manifestVersion({ version: " 0.3.0 " }), "0.3.0");
+  assert.equal(M.manifestVersion({ nope: 1 }), "");
+  assert.match(M.rawManifestUrl(), /^https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[^/]+\/manifest\.json$/);
+  assert.match(M.releasesUrl(), /^https:\/\/github\.com\/[^/]+\/[^/]+\/releases$/);
+});
+
+test("normalizedConfig: checkForUpdates / updateCheckHours", () => {
+  assert.equal(M.normalizedConfig({ checkForUpdates: "off" }).checkForUpdates, false);
+  assert.equal(M.normalizedConfig(null).checkForUpdates, true);
+  assert.equal(M.normalizedConfig({ updateCheckHours: 0 }).updateCheckHours, 1);
+  assert.equal(M.normalizedConfig({ updateCheckHours: 999 }).updateCheckHours, 168);
+  assert.equal(M.normalizedConfig({ updateCheckHours: "24" }).updateCheckHours, 24);
+  assert.equal(M.normalizedConfig(null).updateCheckHours, 12);
+});
+
 // ---- "My models" tab -----------------------------------------
 
 const MY_DESIGNS = {

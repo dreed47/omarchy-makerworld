@@ -43,6 +43,8 @@
       "showPoints": "on",
       "boostExpiryWarnDays": 5,
       "notifyMilestones": "on",
+      "checkForUpdates": "on",
+      "updateCheckHours": 12,
       "debug": "off"
     },
     "schema": [
@@ -58,6 +60,8 @@
       { "key": "showPoints", "type": "string", "label": "Show the point balance in the bar pill: on or off" },
       { "key": "boostExpiryWarnDays", "type": "int", "label": "Warn this many days before a boost token expires (0 = off, needs 'points' notifications on)" },
       { "key": "notifyMilestones", "type": "string", "label": "Notify when your models pass a round download / like total: on or off" },
+      { "key": "checkForUpdates", "type": "string", "label": "Check GitHub for a newer version of this plugin and show an Update button: on or off" },
+      { "key": "updateCheckHours", "type": "int", "label": "Hours between update checks (1-168)" },
       { "key": "debug", "type": "string", "label": "Log raw API responses to the shell log: on or off" }
     ]
   }

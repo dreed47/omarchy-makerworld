@@ -41,6 +41,14 @@ Panel {
   readonly property string connState: svc ? String(svc.connState || "init") : "init"
   readonly property string profileName: svc ? String(svc.profileName || "") : ""
 
+  readonly property bool updateAvailable: svc ? svc.updateAvailable === true : false
+  readonly property string latestVersion: svc ? String(svc.latestVersion || "") : ""
+  property bool updateStarted: false
+  function doUpdate() {
+    if (svc && svc.runUpdate) svc.runUpdate()
+    root.updateStarted = true
+  }
+
   readonly property string brandGlyph: String.fromCharCode(0xf1b2)  // nf-fa-cube
   readonly property string coinGlyph: Model.glyphFor("points")
   readonly property string bullet: String.fromCharCode(0x2022)
@@ -451,6 +459,72 @@ Panel {
           visible: !root.editingSettings
           width: parent.width
           spacing: Style.space(12)
+
+          // ---- Update-available banner
+          Rectangle {
+            visible: root.updateAvailable
+            width: parent.width
+            height: visible ? updRow.implicitHeight + Style.space(14) : 0
+            radius: Style.cornerRadius
+            color: "transparent"
+            border.width: 1
+            border.color: Color.accent
+            Row {
+              id: updRow
+              x: Style.space(10); y: Style.space(7)
+              width: parent.width - Style.space(20)
+              spacing: Style.space(8)
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width - updBtn.width - relLink.width - parent.spacing * 2
+                wrapMode: Text.WordWrap
+                text: root.updateStarted
+                  ? "Updating… restart the shell to finish"
+                  : ("Update available: v" + root.latestVersion)
+                color: root.fg
+                font.family: root.mono
+                font.pixelSize: Style.font.caption
+              }
+              Rectangle {
+                id: updBtn
+                visible: !root.updateStarted
+                anchors.verticalCenter: parent.verticalCenter
+                width: Style.space(56); height: Style.space(24)
+                radius: Style.cornerRadius
+                color: updBtnArea.containsMouse
+                  ? (root.bar ? Style.hoverFillFor(root.fg, Color.accent) : "#333") : "transparent"
+                border.width: 1
+                border.color: Color.accent
+                Text {
+                  anchors.centerIn: parent
+                  text: "Update"
+                  color: root.fg
+                  font.family: root.mono
+                  font.pixelSize: Style.font.caption
+                }
+                MouseArea {
+                  id: updBtnArea
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.doUpdate()
+                }
+              }
+              Text {
+                id: relLink
+                anchors.verticalCenter: parent.verticalCenter
+                text: "notes " + String.fromCharCode(0x2197)
+                color: Color.accent
+                font.family: root.mono
+                font.pixelSize: Style.font.caption
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.openUrl(Model.releasesUrl())
+                }
+              }
+            }
+          }
 
           // ---- Setup / connection banner
           Rectangle {

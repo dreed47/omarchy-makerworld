@@ -11,5 +11,7 @@
   "showPoints": true,
   "boostExpiryWarnDays": 5,
   "notifyMilestones": true,
+  "checkForUpdates": true,
+  "updateCheckHours": 12,
   "debug": false
 }
