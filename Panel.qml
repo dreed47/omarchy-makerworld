@@ -312,6 +312,7 @@ Panel {
   function saveSettings() {
     if (savingSettings) return
     savingSettings = true
+    settingsSaveQueueSnapshot = []
     var poll = parseInt(draftPollSeconds, 10)
     if (isNaN(poll) || poll < 120) poll = 120
     settingsSaveQueue = [
@@ -323,14 +324,31 @@ Panel {
     ]
     runNextSettingsSave()
   }
+
+  // Push the saved values onto the live bar widget straight away, so the pill
+  // reflects them before the shell's shell.json watcher re-injects `settings`.
+  function applySettingsLocally() {
+    if (!hostWidget) return
+    var entry = {}
+    var src = hostWidget.settings || {}
+    for (var k in src) entry[k] = src[k]
+    for (var i = 0; i < settingsSaveQueueSnapshot.length; i++)
+      entry[settingsSaveQueueSnapshot[i][0]] = settingsSaveQueueSnapshot[i][1]
+    entry.id = root.pluginId
+    hostWidget.settings = entry
+  }
+  property var settingsSaveQueueSnapshot: []
+
   function runNextSettingsSave() {
     if (settingsSaveQueue.length === 0) {
       savingSettings = false
       editingSettings = false
+      root.applySettingsLocally()
       Qt.callLater(root.refresh)
       return
     }
     var pair = settingsSaveQueue.shift()
+    root.settingsSaveQueueSnapshot.push(pair)
     settingsSaveProc.command = ["omarchy-bar", "set", root.ipcTarget, pair[0], pair[1]]
     settingsSaveProc.running = true
   }

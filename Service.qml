@@ -62,7 +62,18 @@ Item {
     } catch (e) {}
     return ({})
   }
-  readonly property var cfg: Model.normalizedConfig(Model.mergeRaw(configJsonRaw, shellEntry))
+  // `shell.shellConfig` does not reliably re-notify when `omarchy-bar set`
+  // rewrites a nested bar-layout entry, so the popup's settings toggles would
+  // not take effect until a shell restart. Watch shell.json directly and pull
+  // our widget's entry from it; this wins over `shellEntry`.
+  readonly property string shellJsonPath: {
+    var xdg = String(Quickshell.env("XDG_CONFIG_HOME") || "")
+    return (xdg !== "" ? xdg : (home + "/.config")) + "/omarchy/shell.json"
+  }
+  property var shellJsonEntry: ({})
+
+  readonly property var cfg: Model.normalizedConfig(
+    Model.mergeRaw(Model.mergeRaw(configJsonRaw, shellEntry), shellJsonEntry))
 
   FileView {
     path: root.configFile
@@ -73,6 +84,29 @@ Item {
       catch (e) { root.configJsonRaw = ({}) }
     }
     onLoadFailed: root.configJsonRaw = ({})
+    onFileChanged: reload()
+  }
+
+  FileView {
+    path: root.shellJsonPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: {
+      try {
+        var sj = JSON.parse(text())
+        var found = null
+        var secs = ["left", "center", "right"]
+        if (sj && sj.bar && sj.bar.layout) {
+          for (var s = 0; s < secs.length; s++) {
+            var arr = sj.bar.layout[secs[s]] || []
+            for (var i = 0; i < arr.length; i++)
+              if (arr[i] && String(arr[i].id) === root.pluginId) found = arr[i]
+          }
+        }
+        root.shellJsonEntry = found || ({})
+      } catch (e) { root.shellJsonEntry = ({}) }
+    }
+    onLoadFailed: root.shellJsonEntry = ({})
     onFileChanged: reload()
   }
 

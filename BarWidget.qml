@@ -86,7 +86,17 @@ BarWidget {
   readonly property real pointsDelta: root.svc ? (root.svc.pointsDelta || 0) : 0
   readonly property int unreadTotal: root.svc ? (root.svc.unreadTotal || 0) : 0
   readonly property real points: root.svc ? root.svc.points : -1
-  readonly property bool showPoints: (root.svc && root.svc.cfg) ? (root.svc.cfg.showPoints !== false) : true
+
+  // Read straight from this widget's shell.json entry, which the bar host
+  // patches in place on `omarchy-bar set` - so the popup's toggle takes effect
+  // without a shell restart. Fall back to the service's merged config (covers
+  // a config.json-only value, or the service running with no bar widget).
+  readonly property bool showPoints: {
+    var s = root.setting("showPoints", undefined)
+    if (s !== undefined && s !== null && String(s) !== "")
+      return Model.truthy(s, true)
+    return (root.svc && root.svc.cfg) ? (root.svc.cfg.showPoints !== false) : true
+  }
 
   readonly property string pointsText: (showPoints && points >= 0)
     ? (Model.groupNum(points) + (pointsDelta > 0 ? " " + String.fromCharCode(0x25b2) : ""))
