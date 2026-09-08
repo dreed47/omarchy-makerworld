@@ -104,6 +104,13 @@ Panel {
   property string tab: "activity"   // "activity" | "models"
   property string designSort: "downloads"   // "downloads" | "likes" | "prints"
 
+  // Every fetch below caps the transfer (`--max-filesize`), refuses redirects
+  // on the bearer-token request (`--max-redirs 0`), and the collectors drop an
+  // over-cap body, so a hostile / broken endpoint cannot flood the shell.
+  readonly property int maxBodyBytes: 8000000
+  readonly property int maxDesignsBytes: 25000000
+  function bodyTooBig(s, cap) { return String(s || "").length > (cap || root.maxBodyBytes) }
+
   // ---- Recent-activity list (this panel's own fetch) -----------------
   property var messages: []
   property bool loading: false
@@ -120,6 +127,7 @@ Panel {
     if (accessToken === "" || designsProc.running) return
     root.designsLoading = true
     designsProc.command = ["curl", "-sS", "--max-time", "25",
+      "--max-filesize", String(root.maxDesignsBytes), "--max-redirs", "0",
       "-H", "Authorization: Bearer " + accessToken,
       "-H", "User-Agent: bambu_network_agent/01.09.05.01",
       "-H", "Accept: application/json",
@@ -134,6 +142,7 @@ Panel {
       waitForEnd: true
       onStreamFinished: {
         root.designsLoading = false
+        if (root.bodyTooBig(text, root.maxDesignsBytes)) { root.designsError = "response too large"; return }
         var r = Model.splitHttp(text)
         if (r.status === 401 || r.status === 403) { root.designsError = "sign-in expired"; return }
         if (r.status < 200 || r.status >= 300) { root.designsError = "HTTP " + r.status; return }
@@ -179,6 +188,7 @@ Panel {
     }
     var cat = root.catQueue.shift()
     listProc.command = ["curl", "-sS", "--max-time", "20",
+      "--max-filesize", String(root.maxBodyBytes), "--max-redirs", "0",
       "-H", "Authorization: Bearer " + accessToken,
       "-H", "User-Agent: bambu_network_agent/01.09.05.01",
       "-H", "Accept: application/json",
@@ -192,6 +202,7 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (root.bodyTooBig(text)) { root.listError = "response too large"; root.catQueue = []; root.loading = false; return }
         var r = Model.splitHttp(text)
         if (r.status === 401 || r.status === 403) {
           root.listError = "sign-in expired"; root.catQueue = []; root.loading = false; return

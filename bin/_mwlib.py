@@ -312,6 +312,36 @@ def mask(token: str) -> str:
 
 # ---- HTTP ----------------------------------------------------------
 
+# These calls carry the Bambu account password or the access/refresh token and
+# hit fixed api.bambulab.com / bambulab.com endpoints. Responses are small
+# JSON, so cap hard and refuse redirects outright - a redirect on a
+# token-bearing request could leak the credential to an unintended origin, and
+# an unbounded body could exhaust memory.
+MAX_RESPONSE_BYTES = 2_000_000
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):  # noqa: D401 - suppress the redirect
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def _read_capped(source) -> bytes:
+    content_length = source.headers.get("Content-Length") if source.headers else None
+    if content_length is not None:
+        try:
+            if int(content_length) > MAX_RESPONSE_BYTES:
+                raise SystemExit(f"response too large ({content_length} bytes)")
+        except ValueError:
+            pass
+    data = source.read(MAX_RESPONSE_BYTES + 1)
+    if len(data) > MAX_RESPONSE_BYTES:
+        raise SystemExit("response exceeded the size cap")
+    return data
+
+
 class HttpResult:
     def __init__(self, status: int, body: bytes, headers):
         self.status = status
@@ -339,10 +369,12 @@ def http(method: str, url: str, token: str | None = None, payload: dict | None =
         headers["Authorization"] = "Bearer " + token
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return HttpResult(resp.status, resp.read(), dict(resp.headers))
+        with _OPENER.open(req, timeout=timeout) as resp:
+            return HttpResult(resp.status, _read_capped(resp), dict(resp.headers))
     except urllib.error.HTTPError as exc:
-        return HttpResult(exc.code, exc.read(), dict(exc.headers or {}))
+        # A blocked redirect surfaces here as a 3xx; callers treat non-200 as
+        # failure and never see a body from the redirect target.
+        return HttpResult(exc.code, _read_capped(exc), dict(exc.headers or {}))
     except urllib.error.URLError as exc:
         raise SystemExit(f"network error talking to {url}: {exc}")
 

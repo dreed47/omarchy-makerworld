@@ -220,15 +220,25 @@ Item {
   //
   // curl carries the auth header and appends the HTTP status after a marker so
   // onStreamFinished can tell 200 from 401 (curl without -f still prints the
-  // error body, which we want for logging).
+  // error body, which we want for logging). `--max-filesize` and `--max-redirs 0`
+  // keep a hostile or broken endpoint from flooding the long-lived shell with
+  // an unbounded body or bouncing the bearer token to another origin; the
+  // collectors also drop anything over `maxBodyBytes` defensively.
+  readonly property int maxBodyBytes: 8000000
   function curlArgs(url, extra) {
     var a = ["curl", "-sS", "--max-time", "20",
+      "--max-filesize", String(root.maxBodyBytes), "--max-redirs", "0",
       "-H", "Authorization: Bearer " + root.accessToken,
       "-H", "User-Agent: bambu_network_agent/01.09.05.01",
       "-H", "Accept: application/json"]
     if (extra) for (var i = 0; i < extra.length; i++) a.push(extra[i])
     a.push("-w"); a.push("\n__HTTP__%{http_code}"); a.push(url)
     return a
+  }
+
+  // Shared guard for every collector: reject an over-cap body outright.
+  function bodyTooBig(s) {
+    return String(s || "").length > root.maxBodyBytes
   }
 
   function dbg(label, s) {
@@ -252,6 +262,7 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (root.bodyTooBig(text)) { root.dbg("oversized response"); return }
         var r = Model.splitHttp(text)
         if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }
         if (r.status < 200 || r.status >= 300 || r.body === "") return
@@ -323,6 +334,7 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (root.bodyTooBig(text)) { root.dbg("oversized response"); return }
         var r = Model.splitHttp(text)
         if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }
         if (r.status >= 200 && r.status < 300 && r.body !== "") {
@@ -366,6 +378,7 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (root.bodyTooBig(text)) { root.dbg("oversized response"); return }
         var r = Model.splitHttp(text)
         if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }
         if (r.status < 200 || r.status >= 300 || r.body === "") return
@@ -472,6 +485,7 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (root.bodyTooBig(text)) { root.dbg("oversized response"); return }
         var r = Model.splitHttp(text)
         if (r.status < 200 || r.status >= 300 || r.body === "") return
         try {
@@ -505,6 +519,7 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (root.bodyTooBig(text)) { root.dbg("oversized response"); return }
         var r = Model.splitHttp(text)
         root.dbg("markread", String(r.status) + " " + r.body)
         if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }

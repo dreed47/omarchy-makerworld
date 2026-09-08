@@ -2,6 +2,15 @@
 
 ## 0.3.0 — unreleased
 
+- Security review follow-up: every network call now enforces a response-size
+  cap and refuses redirects on the bearer-token request. QML `curl` fetches
+  pass `--max-filesize` / `--max-redirs 0` and the collectors drop an over-cap
+  body; `_mwlib.http()` validates `Content-Length`, reads at most
+  `MAX_RESPONSE_BYTES`, and blocks redirects so a token-bearing request can
+  never reach an unintended origin.
+- Fix: popup settings toggles (show-points, notify, poll interval) now take
+  effect live instead of only after a shell restart.
+
 - **"Something new" pill state** — the bar pill tracks what you'd seen the last
   time the popup was open (separate from MakerWorld's server read-state). When
   unread notifications, point balance, or follower count have risen since then,
