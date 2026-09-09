@@ -213,13 +213,13 @@ Item {
     property bool baselined: false
   }
 
-  // ---- Self-update check --------------------------------------
+  // ---- Self-update check (read-only) -------------------------
   //
   // Reads this plugin's own manifest.json for the installed version, and once
   // every `updateCheckHours` fetches manifest.json from the repo's default
-  // branch to see if a newer one is out. `checkForUpdates` opts out (it pings
-  // GitHub on a schedule). The popup's Update button shells out to
-  // `omarchy plugin update`, which owns the git pull + reload.
+  // branch to see if a newer one is out. Purely informational: the popup shows
+  // a "newer version available" note with a link to the releases page - it
+  // never fetches or runs code. `checkForUpdates` opts out of the GitHub ping.
   property string installedVersion: ""
   readonly property string latestVersion: state.latestVersion !== "" ? state.latestVersion : installedVersion
   readonly property bool updateAvailable: Model.versionCmp(latestVersion, installedVersion) > 0
@@ -263,10 +263,6 @@ Item {
         } catch (e) { root.dbg("update check parse error", e) }
       }
     }
-  }
-
-  function runUpdate() {
-    Quickshell.execDetached(["omarchy", "plugin", "update", root.pluginId])
   }
 
   Timer {
@@ -696,7 +692,6 @@ Item {
     function poll(): void { root.resetBaselineAndPoll() }
     function markRead(): void { root.markAllRead() }
     function checkUpdate(): void { root.maybeCheckUpdate(true) }
-    function update(): void { root.runUpdate() }
     function status(): string {
       return JSON.stringify({
         connState: root.connState,

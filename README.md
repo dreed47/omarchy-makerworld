@@ -27,8 +27,8 @@ expiry.
     (`boostExpiryWarnDays` before, using MakerWorld's own reminder)
   - **download / like milestones** — when your models pass a round total
     (250s early on, 1,000s in the thousands, 5,000s past 10k…)
-- **Self-update** — the popup shows an Update button when a newer version is on
-  GitHub; it runs `omarchy plugin update`.
+- **Update check** — the popup shows a note when a newer version is on GitHub,
+  with a link to the release notes.
 
 The pill/popup and the notifier are one plugin; you can mount just the service
 (no bar widget) if you only want notifications.
@@ -110,10 +110,14 @@ bin/makerworld-token --check      # -> "token works - profile: <your name>"
 
 ## Updating
 
-The popup shows an **Update** button when a newer version is on GitHub (checked
-every `updateCheckHours`, default 12; set `checkForUpdates` off to disable).
-The button runs `omarchy plugin update io.github.dreed47.makerworld` — after it
-finishes, restart the shell to load the new code. Or run that command yourself.
+The popup shows a note when a newer version is on GitHub (checked every
+`updateCheckHours`, default 12; set `checkForUpdates` off to disable the
+periodic GitHub request). To apply it:
+
+```sh
+omarchy plugin update io.github.dreed47.makerworld
+omarchy-restart-shell
+```
 
 ## Removing
 
@@ -149,7 +153,7 @@ Both accept booleans and `"on"`/`"off"`.
 | `showPoints` | `on` | show the point balance in the bar pill |
 | `boostExpiryWarnDays` | `5` | warn this many days before a boost token expires (`0` = off; needs `points` in `notifyTypes` and a token in hand) |
 | `notifyMilestones` | `on` | notify when your models pass a round download / like total |
-| `checkForUpdates` | `on` | check GitHub for a newer plugin version and show an Update button in the popup (pings GitHub on a schedule; turn off to stop that) |
+| `checkForUpdates` | `on` | check GitHub for a newer plugin version and show a "newer version available" note in the popup (pings GitHub on a schedule; turn off to stop that) |
 | `updateCheckHours` | `12` | hours between update checks (1–168) |
 | `debug` | `off` | log raw API responses to the shell log to help adjust parsers |
 

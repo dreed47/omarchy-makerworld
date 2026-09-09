@@ -43,11 +43,6 @@ Panel {
 
   readonly property bool updateAvailable: svc ? svc.updateAvailable === true : false
   readonly property string latestVersion: svc ? String(svc.latestVersion || "") : ""
-  property bool updateStarted: false
-  function doUpdate() {
-    if (svc && svc.runUpdate) svc.runUpdate()
-    root.updateStarted = true
-  }
 
   readonly property string brandGlyph: String.fromCharCode(0xf1b2)  // nf-fa-cube
   readonly property string coinGlyph: Model.glyphFor("points")
@@ -460,7 +455,8 @@ Panel {
           width: parent.width
           spacing: Style.space(12)
 
-          // ---- Update-available banner
+          // ---- Update-available note (read-only: shows the version and links
+          //      to the releases page; run `omarchy plugin update` yourself)
           Rectangle {
             visible: root.updateAvailable
             width: parent.width
@@ -476,39 +472,13 @@ Panel {
               spacing: Style.space(8)
               Text {
                 anchors.verticalCenter: parent.verticalCenter
-                width: parent.width - updBtn.width - relLink.width - parent.spacing * 2
+                width: parent.width - relLink.width - parent.spacing
                 wrapMode: Text.WordWrap
-                text: root.updateStarted
-                  ? "Updating… restart the shell to finish"
-                  : ("Update available: v" + root.latestVersion)
+                text: "v" + root.latestVersion + " is available — run  omarchy plugin update  "
+                  + root.pluginId
                 color: root.fg
                 font.family: root.mono
                 font.pixelSize: Style.font.caption
-              }
-              Rectangle {
-                id: updBtn
-                visible: !root.updateStarted
-                anchors.verticalCenter: parent.verticalCenter
-                width: Style.space(56); height: Style.space(24)
-                radius: Style.cornerRadius
-                color: updBtnArea.containsMouse
-                  ? (root.bar ? Style.hoverFillFor(root.fg, Color.accent) : "#333") : "transparent"
-                border.width: 1
-                border.color: Color.accent
-                Text {
-                  anchors.centerIn: parent
-                  text: "Update"
-                  color: root.fg
-                  font.family: root.mono
-                  font.pixelSize: Style.font.caption
-                }
-                MouseArea {
-                  id: updBtnArea
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: root.doUpdate()
-                }
               }
               Text {
                 id: relLink
