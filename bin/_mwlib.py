@@ -11,6 +11,7 @@ import base64
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import time
@@ -57,43 +58,81 @@ def norm_region(region: str) -> str:
     return "china" if r in ("china", "cn") else "global"
 
 
-# ---- token.json --------------------------------------------------------
+# ---- token.json / config.json (0600, symlink-safe writes) ------------
+
+def _read_private(path: str, max_bytes: int = 1_000_000) -> str:
+    """Read a config file with an fd that refuses to follow a symlink, checks
+    that it's a plain file owned by us, and caps the size. Returns "" on any
+    problem (caller treats that as 'absent')."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
+    except OSError:
+        return ""
+    try:
+        st = os.fstat(fd)
+        if not (st.st_mode & 0o170000) == 0o100000:  # S_ISREG
+            return ""
+        if st.st_uid != os.getuid():
+            return ""
+        if st.st_size > max_bytes:
+            return ""
+        return os.read(fd, max_bytes).decode("utf-8", "replace")
+    finally:
+        os.close(fd)
+
+
+def _atomic_write_private(path: str, text: str) -> None:
+    """Write `text` to `path` at mode 0600, atomically, without following a
+    symlink at the temp path or the destination.
+
+    O_EXCL | O_NOFOLLOW on a unique same-directory temp name means a
+    pre-planted symlink (or any pre-existing file) at that path fails the
+    open instead of being written through; os.replace() then swaps it in
+    atomically, replacing a symlink at the destination rather than following
+    it."""
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    tmp = os.path.join(
+        directory, f".{os.path.basename(path)}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+    )
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    fd = os.open(tmp, flags, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        if os.path.islink(path):
+            raise SystemExit(f"{path} is a symlink; refusing to write through it")
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
 
 def load_token() -> dict:
     try:
-        with open(TOKEN_FILE, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
+        data = json.loads(_read_private(TOKEN_FILE) or "{}")
         return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
+    except ValueError:
         return {}
 
 
 def save_token(data: dict) -> None:
-    os.makedirs(CONF_DIR, exist_ok=True)
     data = dict(data)
     data["savedAt"] = int(time.time())
     # QML's JS engine has no atob(), so the service can't decode the JWT
     # itself. Stash the expiry (epoch seconds, 0 if unreadable) here for it.
     data["accessTokenExp"] = jwt_exp(data.get("accessToken", ""))
-    tmp = TOKEN_FILE + ".tmp"
-    old_umask = os.umask(0o077)
-    try:
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-            fh.write("\n")
-        os.replace(tmp, TOKEN_FILE)
-    finally:
-        os.umask(old_umask)
+    _atomic_write_private(TOKEN_FILE, json.dumps(data, indent=2) + "\n")
 
 
 def scaffold_config() -> bool:
     """Write a default config.json if none exists. Returns True if created."""
-    if os.path.exists(CONFIG_FILE):
+    if os.path.lexists(CONFIG_FILE):
         return False
-    os.makedirs(CONF_DIR, exist_ok=True)
-    with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
-        json.dump(DEFAULT_CONFIG, fh, indent=2)
-        fh.write("\n")
+    _atomic_write_private(CONFIG_FILE, json.dumps(DEFAULT_CONFIG, indent=2) + "\n")
     return True
 
 

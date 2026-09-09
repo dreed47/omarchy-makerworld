@@ -2,6 +2,12 @@
 
 ## 0.3.0 — unreleased
 
+- Security review follow-up: `token.json` / `config.json` are now written with
+  `O_CREAT | O_EXCL | O_NOFOLLOW` on a unique same-directory temp name at mode
+  0600, then atomically renamed — a pre-planted symlink at the temp or
+  destination path fails the write instead of redirecting it. The Python token
+  read is fd-bound (`O_NOFOLLOW`, regular-file + owner + size checks).
+
 - **Update check (read-only)** — the service reads its own `manifest.json`
   version and, every `updateCheckHours` (default 12), fetches `manifest.json`
   from the repo's default branch to compare. When a newer version is out the
