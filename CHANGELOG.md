@@ -2,6 +2,21 @@
 
 ## 0.3.0 — unreleased
 
+- Security review follow-up: `_mwlib.safe_summary()` (added the round below)
+  still let a server-controlled response echo a secret through an
+  allowlisted *string* field name (`message`, `error`, …) — the endpoint
+  being summarized is exactly the one that could put a password, code,
+  token, cookie, or challenge value into its own response. Narrowed
+  `SAFE_RESPONSE_KEYS` to `code`/`status`/`success` and changed the value
+  filter from "any scalar" to "non-string scalar only" (`bool`/`int`/`float`)
+  — no string value from a response is ever printed now, allowlisted key or
+  not, since a string is the only shape that can hold free-form secret
+  content. Added `tests/test_mwlib.py`: canary secrets placed in every
+  allowlisted field (as a string, and nested in a list/dict under one),
+  every non-allowlisted field, and every non-dict input shape, asserting the
+  canary never appears in `safe_summary()`'s output — wired into
+  `npm run check`.
+
 - Security review follow-up: `makerworld-login`'s `--code <value>` put a
   TFA/email verification code in argv/`ps`/`/proc/<pid>/cmdline` and shell
   history. It's gone; a code is now `getpass`-prompted (hidden entry, same as

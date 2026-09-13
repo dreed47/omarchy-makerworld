@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "test": "node --test",
-    "check": "node --check Model.js && node --test && python3 -m py_compile bin/_mwlib.py bin/makerworld-login bin/makerworld-refresh bin/makerworld-token && node scripts/validate-manifest.mjs"
+    "check": "node --check Model.js && node --test && python3 -m py_compile bin/_mwlib.py bin/makerworld-login bin/makerworld-refresh bin/makerworld-token && python3 -m unittest discover -s tests -p 'test_*.py' -v && node scripts/validate-manifest.mjs"
   },
   "repository": {
     "type": "git",

@@ -431,34 +431,37 @@ def http(method: str, url: str, token: str | None = None, payload: dict | None =
 
 # ---- Safe-to-print response summaries ---------------------------------
 #
-# Login/refresh responses can carry a token, a refresh token, a TFA session
-# key, a Set-Cookie, or (on a Bambu API change we haven't seen yet) some new
-# field of the same kind - and error paths want to show *something* useful
-# about a failed response without risking any of that. An allowlist is the
-# only safe shape for this: a blocklist fails open on exactly the case that
-# matters here (a newly introduced credential-shaped field), where an
-# allowlist fails closed - an unrecognized field is omitted, never printed.
-SAFE_RESPONSE_KEYS = {
-    "code", "message", "msg", "error", "error_description",
-    "logintype", "login_type", "status", "success", "result",
-}
+# The authentication endpoint we're summarizing here is exactly the thing
+# that could put a password, code, token, cookie, or challenge/session value
+# into a response - including inside a field whose *name* looks diagnostic,
+# like "message" or "error". An allowlist keyed on field name isn't enough by
+# itself: it protects against a field we don't recognize, but not against a
+# server choosing to echo secret content through a field we do recognize as
+# safe. The value type is the only thing that actually settles it - a
+# str/free-form field can hold anything, a bool/number can't hold a
+# credential - so this only ever passes through non-string scalars for a
+# small set of genuinely enum-shaped fields, and every string value from the
+# response, allowlisted key or not, is withheld. Local, fixed wording plus
+# these enums is what every caller composes its message from.
+SAFE_RESPONSE_KEYS = {"code", "status", "success"}
 
 
 def safe_summary(obj) -> str:
-    """Render only the allowlisted, scalar-valued top-level fields of an API
-    response - everything else is counted, never shown."""
+    """Render only non-string scalar (bool/int/float) values of a small set
+    of allowlisted, enum-shaped top-level fields. No string value from `obj`
+    is ever included, no matter its key - a server-controlled response could
+    put a secret in any string field, allowlisted name or not."""
     d = obj if isinstance(obj, dict) else {}
     kept = []
     omitted = 0
     for k, v in d.items():
-        if str(k).lower() in SAFE_RESPONSE_KEYS and isinstance(v, (str, int, float, bool)):
-            s = str(v)
-            kept.append(f"{k}={s if len(s) <= 200 else s[:200] + chr(8230)}")
+        if str(k).lower() in SAFE_RESPONSE_KEYS and isinstance(v, (bool, int, float)):
+            kept.append(f"{k}={v}")
         else:
             omitted += 1
     if omitted:
-        kept.append(f"(+{omitted} other field(s) withheld)")
-    return ", ".join(kept) if kept else "(no recognized fields; response withheld)"
+        kept.append(f"(+{omitted} field(s) withheld)")
+    return ", ".join(kept) if kept else "(no numeric/status fields; response withheld)"
 
 
 def unwrap(obj):
