@@ -238,30 +238,27 @@ Item {
   function maybeCheckUpdate(force) {
     if (!cfg.checkForUpdates || updateCheckProc.running) return
     if (!force && (Date.now() - (state.updateCheckedAt || 0)) < root.updateCheckMs - 60000) return
-    updateCheckProc.command = ["curl", "-sS", "--max-time", "15",
-      "--max-filesize", "200000", "--max-redirs", "0",
-      "-H", "Accept: application/json",
-      "-w", "\n__HTTP__%{http_code}", Model.rawManifestUrl()]
-    updateCheckProc.running = true
+    updateCheckProc.maxBytes = 200000
+    updateCheckProc.start(Model.curlConfigText({ url: Model.rawManifestUrl(), maxFilesizeBytes: 200000 }))
   }
 
-  Process {
+  // No token involved (a public manifest.json on GitHub's raw CDN), but this
+  // still goes through AuthedRequest for the same absolute-path / no-shell /
+  // clean-environment / bounded-read handling as every other request - one
+  // reviewed code path for all network access rather than a special case.
+  AuthedRequest {
     id: updateCheckProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (root.bodyTooBig(text)) return
-        var r = Model.splitHttp(text)
-        if (r.status < 200 || r.status >= 300 || r.body === "") return
-        try {
-          var v = Model.manifestVersion(JSON.parse(r.body))
-          if (Model.parseVersion(v)) {
-            state.latestVersion = v
-            state.updateCheckedAt = Date.now()
-            root.dbg("update check", "latest " + v + " installed " + root.installedVersion)
-          }
-        } catch (e) { root.dbg("update check parse error", e) }
-      }
+    onFinishedWith: function (body, status, tooLarge) {
+      if (tooLarge) return
+      if (status < 200 || status >= 300 || body === "") return
+      try {
+        var v = Model.manifestVersion(JSON.parse(body))
+        if (Model.parseVersion(v)) {
+          state.latestVersion = v
+          state.updateCheckedAt = Date.now()
+          root.dbg("update check", "latest " + v + " installed " + root.installedVersion)
+        }
+      } catch (e) { root.dbg("update check parse error", e) }
     }
   }
 
@@ -281,19 +278,16 @@ Item {
 
   // ---- HTTP helpers ----------------------------------------------
   //
-  // The bearer token never becomes a command-line argument: `curl -K -` reads
-  // its whole request (headers, method, body, URL, transfer limits) as a
-  // config file piped to its stdin, so nothing sensitive is visible via `ps`
-  // or `/proc/<pid>/cmdline`. `--max-filesize` catches an over-cap response
-  // with a declared Content-Length; `head -c` behind the pipe catches one
-  // that doesn't declare a length at all; the collectors also drop anything
-  // over `maxBodyBytes` defensively once it lands in QML.
+  // Every authenticated request goes through AuthedRequest.qml: the bearer
+  // token travels only as stdin config for a fixed, absolute-path `curl`
+  // invocation (never argv), that process runs with a cleared/minimal
+  // environment, and its response is capped as bytes stream in rather than
+  // measured after the fact. See AuthedRequest.qml for the full reasoning.
   readonly property int maxBodyBytes: 8000000
 
-  // Starts (or no-ops if already running) an authenticated request on `proc`,
-  // a Process declared with `stdinEnabled: true` and an `onStarted` that
-  // writes `proc._configText` then closes stdin (see countsProc etc. below).
-  // `extra` may set `method`, `data`, `extraHeaders`, `maxFilesizeBytes`.
+  // Starts (or no-ops if already running) an authenticated request on `proc`
+  // (an AuthedRequest instance - see countsProc etc. below). `extra` may set
+  // `method`, `data`, `extraHeaders`, `maxFilesizeBytes`.
   function startAuthed(proc, url, extra) {
     if (proc.running) return
     var e = extra || {}
@@ -302,14 +296,8 @@ Item {
     if (e.method) cfgOpts.method = e.method
     if (e.data !== undefined) cfgOpts.data = e.data
     if (e.extraHeaders) cfgOpts.extraHeaders = e.extraHeaders
-    proc.command = Model.curlPipeCommand(cap)
-    proc._configText = Model.curlConfigText(cfgOpts)
-    proc.running = true
-  }
-
-  // Shared guard for every collector: reject an over-cap body outright.
-  function bodyTooBig(s) {
-    return String(s || "").length > root.maxBodyBytes
+    proc.maxBytes = cap
+    proc.start(Model.curlConfigText(cfgOpts))
   }
 
   function dbg(label, s) {
@@ -327,25 +315,18 @@ Item {
     root.startAuthed(countsProc, Model.urlMessageCount(root.region))
   }
 
-  Process {
+  AuthedRequest {
     id: countsProc
-    property string _configText: ""
-    stdinEnabled: true
-    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (root.bodyTooBig(text)) { root.dbg("oversized response"); return }
-        var r = Model.splitHttp(text)
-        if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }
-        if (r.status < 200 || r.status >= 300 || r.body === "") return
-        try {
-          var json = JSON.parse(r.body)
-          root.dbg("counts", r.body)
-          if (Model.isAuthError(json)) { root.onAuthFail(); return }
-          root.handleCounts(json)
-        } catch (e) { root.dbg("counts parse error", e) }
-      }
+    onFinishedWith: function (body, status, tooLarge) {
+      if (tooLarge) { root.dbg("oversized response"); return }
+      if (status === 401 || status === 403) { root.onAuthFail(); return }
+      if (status < 200 || status >= 300 || body === "") return
+      try {
+        var json = JSON.parse(body)
+        root.dbg("counts", body)
+        if (Model.isAuthError(json)) { root.onAuthFail(); return }
+        root.handleCounts(json)
+      } catch (e) { root.dbg("counts parse error", e) }
     }
   }
 
@@ -401,27 +382,20 @@ Item {
     root.startAuthed(messagesProc, Model.urlMessages(root.region, limit, 0, cat))
   }
 
-  Process {
+  AuthedRequest {
     id: messagesProc
-    property string _configText: ""
-    stdinEnabled: true
-    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (root.bodyTooBig(text)) { root.dbg("oversized response"); return }
-        var r = Model.splitHttp(text)
-        if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }
-        if (r.status >= 200 && r.status < 300 && r.body !== "") {
-          try {
-            var json = JSON.parse(r.body)
-            root.dbg("messages", r.body)
-            if (Model.isAuthError(json)) { root.onAuthFail(); return }
-            root.handleMessages(json)
-          } catch (e) { root.dbg("messages parse error", e) }
-        }
-        Qt.callLater(root.pumpFetch)   // next queued category, if any
+    onFinishedWith: function (body, status, tooLarge) {
+      if (tooLarge) { root.dbg("oversized response") }
+      else if (status === 401 || status === 403) { root.onAuthFail(); return }
+      else if (status >= 200 && status < 300 && body !== "") {
+        try {
+          var json = JSON.parse(body)
+          root.dbg("messages", body)
+          if (Model.isAuthError(json)) { root.onAuthFail(); return }
+          root.handleMessages(json)
+        } catch (e) { root.dbg("messages parse error", e) }
       }
+      Qt.callLater(root.pumpFetch)   // next queued category, if any
     }
   }
 
@@ -447,24 +421,17 @@ Item {
     root.startAuthed(profileProc, Model.urlProfile(root.region))
   }
 
-  Process {
+  AuthedRequest {
     id: profileProc
-    property string _configText: ""
-    stdinEnabled: true
-    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (root.bodyTooBig(text)) { root.dbg("oversized response"); return }
-        var r = Model.splitHttp(text)
-        if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }
-        if (r.status < 200 || r.status >= 300 || r.body === "") return
-        try {
-          var json = JSON.parse(r.body)
-          root.dbg("profile", r.body)
-          root.handleProfile(json)
-        } catch (e) { root.dbg("profile parse error", e) }
-      }
+    onFinishedWith: function (body, status, tooLarge) {
+      if (tooLarge) { root.dbg("oversized response"); return }
+      if (status === 401 || status === 403) { root.onAuthFail(); return }
+      if (status < 200 || status >= 300 || body === "") return
+      try {
+        var json = JSON.parse(body)
+        root.dbg("profile", body)
+        root.handleProfile(json)
+      } catch (e) { root.dbg("profile parse error", e) }
     }
   }
 
@@ -556,31 +523,24 @@ Item {
     root.startAuthed(boostProc, Model.urlMessages(root.region, 50, 0, 3))
   }
 
-  Process {
+  AuthedRequest {
     id: boostProc
-    property string _configText: ""
-    stdinEnabled: true
-    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (root.bodyTooBig(text)) { root.dbg("oversized response"); return }
-        var r = Model.splitHttp(text)
-        if (r.status < 200 || r.status >= 300 || r.body === "") return
-        try {
-          var list = Model.extractMessages(JSON.parse(r.body))
-          var soon = Model.boostExpirySoonest(list, Date.now())
-          if (!soon) return
-          var daysMs = cfg.boostExpiryWarnDays * 86400 * 1000
-          if ((soon.ms - Date.now()) > daysMs) return
-          if (String(soon.rightId) === state.boostWarnedId) return
-          root.enqueueNotify("Boost token expiring",
-            "A boost token expires " + Model.untilTime(soon.ms, Date.now())
-              + " (" + Model.isoDate(soon.iso) + ") - use it before it's gone",
-            Model.glyphFor("points"), Model.boostPageUrl(root.region))
-          state.boostWarnedId = String(soon.rightId)
-        } catch (e) { root.dbg("boost expiry parse error", e) }
-      }
+    onFinishedWith: function (body, status, tooLarge) {
+      if (tooLarge) { root.dbg("oversized response"); return }
+      if (status < 200 || status >= 300 || body === "") return
+      try {
+        var list = Model.extractMessages(JSON.parse(body))
+        var soon = Model.boostExpirySoonest(list, Date.now())
+        if (!soon) return
+        var daysMs = cfg.boostExpiryWarnDays * 86400 * 1000
+        if ((soon.ms - Date.now()) > daysMs) return
+        if (String(soon.rightId) === state.boostWarnedId) return
+        root.enqueueNotify("Boost token expiring",
+          "A boost token expires " + Model.untilTime(soon.ms, Date.now())
+            + " (" + Model.isoDate(soon.iso) + ") - use it before it's gone",
+          Model.glyphFor("points"), Model.boostPageUrl(root.region))
+        state.boostWarnedId = String(soon.rightId)
+      } catch (e) { root.dbg("boost expiry parse error", e) }
     }
   }
 
@@ -591,35 +551,39 @@ Item {
       { method: "POST", data: "{}", extraHeaders: ["Content-Type: application/json"] })
   }
 
-  Process {
+  AuthedRequest {
     id: markReadProc
-    property string _configText: ""
-    stdinEnabled: true
-    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (root.bodyTooBig(text)) { root.dbg("oversized response"); return }
-        var r = Model.splitHttp(text)
-        root.dbg("markread", String(r.status) + " " + r.body)
-        if (r.status === 401 || r.status === 403) { root.onAuthFail(); return }
-        // Optimistically clear locally, then re-poll for the real numbers.
-        root.unreadByType = ({})
-        root.unreadTotal = 0
-        Qt.callLater(root.pollCounts)
-      }
+    onFinishedWith: function (body, status, tooLarge) {
+      if (tooLarge) { root.dbg("oversized response"); return }
+      root.dbg("markread", String(status) + " " + body)
+      if (status === 401 || status === 403) { root.onAuthFail(); return }
+      // Optimistically clear locally, then re-poll for the real numbers.
+      root.unreadByType = ({})
+      root.unreadTotal = 0
+      Qt.callLater(root.pollCounts)
     }
   }
 
   // ---- Token refresh --------------------------------------
   function beginRefresh() {
     if (refreshProc.running) return
-    refreshProc.command = [root.cli("makerworld-refresh")]
+    // Absolute python3, `-I` (isolated: ignores PYTHONPATH/PYTHONSTARTUP/user
+    // site-packages) rather than relying on the script's own shebang, which
+    // would resolve `python3` through `env` and PATH. The refresh script is
+    // handed the token; nothing here should be steerable by the environment
+    // this service inherited.
+    refreshProc.command = ["/usr/bin/python3", "-I", root.cli("makerworld-refresh")]
     refreshProc.running = true
   }
 
   Process {
     id: refreshProc
+    clearEnvironment: true
+    environment: ({
+      PATH: "/usr/bin",
+      HOME: String(Quickshell.env("HOME") || ""),
+      XDG_CONFIG_HOME: String(Quickshell.env("XDG_CONFIG_HOME") || "")
+    })
     onExited: function (code) {
       if (code === 0) {
         // token.json rewritten -> FileView.onFileChanged reloads it and
@@ -644,14 +608,18 @@ Item {
 
   function enqueueNotify(headline, body, glyph, url) {
     if (!root.cfg.notify) return
-    var cmd = ["omarchy-notification-send", "--app-name", "MakerWorld", "-u", "normal"]
+    // Absolute paths so nothing here is resolved through a PATH another
+    // local process could have prepended to; unlike the curl requests these
+    // need the desktop's own environment (Wayland/D-Bus) to function, so only
+    // the executables are pinned, not the environment.
+    var cmd = ["/usr/bin/omarchy-notification-send", "--app-name", "MakerWorld", "-u", "normal"]
     if (glyph && glyph !== "") { cmd.push("-g"); cmd.push(String(glyph)) }
     var to = parseInt(root.cfg.notifyTimeoutSeconds, 10) || 0
     if (to > 0) { cmd.push("-t"); cmd.push(String(to * 1000)) }
     cmd.push(String(headline))
     if (body && body !== "") cmd.push(String(body))
     if (root.cfg.openOnClick && url && url !== "") {
-      cmd.push("--exec"); cmd.push("xdg-open"); cmd.push(String(url))
+      cmd.push("--exec"); cmd.push("/usr/bin/xdg-open"); cmd.push(String(url))
     }
     notifyQueue.push(cmd)
     runNextNotify()
@@ -675,7 +643,7 @@ Item {
     var now = Date.now()
     if (now - lastSoundMs < 8000) return
     lastSoundMs = now
-    soundProc.command = ["pw-play", String(path)]
+    soundProc.command = ["/usr/bin/pw-play", String(path)]
     soundProc.running = true
   }
 

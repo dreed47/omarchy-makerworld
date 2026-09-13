@@ -1000,15 +1000,6 @@ function curlConfigText(opts) {
   return lines.join("\n") + "\n";
 }
 
-// A constant argv - no value is ever interpolated except the (non-secret)
-// byte cap - that reads curl's config from stdin and enforces the size cap a
-// second way: `--max-filesize` only acts on a declared Content-Length, so a
-// chunked/unknown-length response is capped here instead by `head -c`.
-function curlPipeCommand(maxBytes) {
-  var n = (parseInt(maxBytes, 10) || 8000000) + 1;
-  return ["bash", "-c", "set -o pipefail; curl -K - | head -c " + n];
-}
-
 if (typeof module !== "undefined") {
   module.exports = {
     normalizedRegion: normalizedRegion,
@@ -1079,7 +1070,6 @@ if (typeof module !== "undefined") {
     relTime: relTime,
     splitHttp: splitHttp,
     curlEscape: curlEscape,
-    curlConfigText: curlConfigText,
-    curlPipeCommand: curlPipeCommand
+    curlConfigText: curlConfigText
   };
 }

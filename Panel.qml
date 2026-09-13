@@ -107,12 +107,13 @@ Panel {
   property string tab: "activity"   // "activity" | "models"
   property string designSort: "downloads"   // "downloads" | "likes" | "prints"
 
-  // Every fetch below caps the transfer (`--max-filesize`), refuses redirects
-  // on the bearer-token request (`--max-redirs 0`), and the collectors drop an
-  // over-cap body, so a hostile / broken endpoint cannot flood the shell.
+  // Every fetch below goes through AuthedRequest.qml: the bearer token
+  // travels only as stdin config for a fixed, absolute-path `curl` (never
+  // argv), that process runs with a cleared/minimal environment, and its
+  // response is capped as bytes stream in rather than measured after the
+  // fact - see AuthedRequest.qml for the full reasoning.
   readonly property int maxBodyBytes: 8000000
   readonly property int maxDesignsBytes: 25000000
-  function bodyTooBig(s, cap) { return String(s || "").length > (cap || root.maxBodyBytes) }
 
   // ---- Recent-activity list (this panel's own fetch) -----------------
   property var messages: []
@@ -127,36 +128,29 @@ Panel {
   property string designsError: ""
 
   function fetchDesigns() {
-    if (accessToken === "" || designsProc.running || !svc || !svc.startAuthed) return
+    if (accessToken === "" || designsProc.running) return
     root.designsLoading = true
-    // Reuses the service's request helper (config-on-stdin, never argv - see
-    // Service.qml startAuthed()) so the token never appears in this process's
-    // command line either.
-    svc.startAuthed(designsProc, Model.urlMyDesigns(region, 60, 0), { maxFilesizeBytes: root.maxDesignsBytes })
+    designsProc.maxBytes = root.maxDesignsBytes
+    designsProc.start(Model.curlConfigText({
+      token: accessToken, url: Model.urlMyDesigns(region, 60, 0), maxFilesizeBytes: root.maxDesignsBytes
+    }))
   }
 
-  Process {
+  AuthedRequest {
     id: designsProc
-    property string _configText: ""
-    stdinEnabled: true
-    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        root.designsLoading = false
-        if (root.bodyTooBig(text, root.maxDesignsBytes)) { root.designsError = "response too large"; return }
-        var r = Model.splitHttp(text)
-        if (r.status === 401 || r.status === 403) { root.designsError = "sign-in expired"; return }
-        if (r.status < 200 || r.status >= 300) { root.designsError = "HTTP " + r.status; return }
-        try {
-          var parsed = Model.parseMyDesigns(JSON.parse(r.body), root.region)
-          root.myDesigns = parsed.designs
-          root.myDesignsTotal = parsed.total
-          root.designsLoaded = true
-          root.designsError = ""
-        } catch (e) {
-          root.designsError = "could not read the response"
-        }
+    onFinishedWith: function (body, status, tooLarge) {
+      root.designsLoading = false
+      if (tooLarge) { root.designsError = "response too large"; return }
+      if (status === 401 || status === 403) { root.designsError = "sign-in expired"; return }
+      if (status < 200 || status >= 300) { root.designsError = "HTTP " + status; return }
+      try {
+        var parsed = Model.parseMyDesigns(JSON.parse(body), root.region)
+        root.myDesigns = parsed.designs
+        root.myDesignsTotal = parsed.total
+        root.designsLoaded = true
+        root.designsError = ""
+      } catch (e) {
+        root.designsError = "could not read the response"
       }
     }
   }
@@ -189,43 +183,41 @@ Panel {
       return
     }
     var cat = root.catQueue.shift()
-    if (!svc || !svc.startAuthed) { root.loading = false; return }
-    svc.startAuthed(listProc, Model.urlMessages(region, 15, 0, cat), { maxFilesizeBytes: root.maxBodyBytes })
+    listProc.maxBytes = root.maxBodyBytes
+    listProc.start(Model.curlConfigText({
+      token: accessToken, url: Model.urlMessages(region, 15, 0, cat), maxFilesizeBytes: root.maxBodyBytes
+    }))
   }
 
-  Process {
+  AuthedRequest {
     id: listProc
-    property string _configText: ""
-    stdinEnabled: true
-    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (root.bodyTooBig(text)) { root.listError = "response too large"; root.catQueue = []; root.loading = false; return }
-        var r = Model.splitHttp(text)
-        if (r.status === 401 || r.status === 403) {
-          root.listError = "sign-in expired"; root.catQueue = []; root.loading = false; return
-        }
-        if (r.status >= 200 && r.status < 300) {
-          try {
-            var raw = Model.extractMessages(JSON.parse(r.body))
-            var out = []
-            for (var i = 0; i < raw.length; i++) out.push(Model.formatMessage(raw[i], root.region))
-            root.catResults = root.catResults.concat([out])
-          } catch (e) {
-            root.listError = "could not read the response"
-          }
-        } else {
-          root.listError = "HTTP " + r.status
-        }
-        Qt.callLater(root.pumpList)
+    onFinishedWith: function (body, status, tooLarge) {
+      if (tooLarge) {
+        root.listError = "response too large"; root.catQueue = []; root.loading = false; return
       }
+      if (status === 401 || status === 403) {
+        root.listError = "sign-in expired"; root.catQueue = []; root.loading = false; return
+      }
+      if (status >= 200 && status < 300) {
+        try {
+          var raw = Model.extractMessages(JSON.parse(body))
+          var out = []
+          for (var i = 0; i < raw.length; i++) out.push(Model.formatMessage(raw[i], root.region))
+          root.catResults = root.catResults.concat([out])
+        } catch (e) {
+          root.listError = "could not read the response"
+        }
+      } else {
+        root.listError = "HTTP " + status
+      }
+      Qt.callLater(root.pumpList)
     }
   }
 
-  Process { id: openProc }
   function openUrl(url) {
-    if (url && url !== "") Quickshell.execDetached(["omarchy-launch-browser", String(url)])
+    // Absolute path: nothing here should be resolved through a PATH another
+    // local process could have prepended to.
+    if (url && url !== "") Quickshell.execDetached(["/usr/bin/omarchy-launch-browser", String(url)])
   }
   function openMyModels() {
     // The notification centre - the thing this popup mirrors.
@@ -359,7 +351,7 @@ Panel {
     }
     var pair = settingsSaveQueue.shift()
     root.settingsSaveQueueSnapshot.push(pair)
-    settingsSaveProc.command = ["omarchy-bar", "set", root.ipcTarget, pair[0], pair[1]]
+    settingsSaveProc.command = ["/usr/bin/omarchy-bar", "set", root.ipcTarget, pair[0], pair[1]]
     settingsSaveProc.running = true
   }
   Process {

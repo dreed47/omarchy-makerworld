@@ -5,11 +5,32 @@
 - Security review follow-up: the bearer token no longer travels as a `curl`
   command-line argument. Every authenticated request (`Service.qml`'s five
   requests, `Panel.qml`'s two) now feeds curl its headers/method/body/URL as
-  a config file over `curl -K -`'s stdin, so `ps` / `/proc/<pid>/cmdline`
-  never show the token - verified with a live canary-token check. Config
-  values are escaped against curl-config injection and stripped of CR/LF
-  (header injection); the response-size double-cap (`--max-filesize` +
-  `head -c`) and no-redirect hardening apply unchanged to every request.
+  a config file over `curl -q -K -`'s stdin via `AuthedRequest.qml`, so `ps` /
+  `/proc/<pid>/cmdline` never show the token - verified with a live
+  canary-token check. Config values are escaped against curl-config injection
+  and stripped of CR/LF (header injection); `--max-filesize` and no-redirect
+  hardening still apply.
+
+- Security review follow-up: removed the `bash -c "curl -K - | head -c …"`
+  pipeline that carried the token to curl's stdin — an inherited `BASH_ENV`
+  runs before the command, and bare `bash`/`curl`/`head` were PATH-resolved,
+  so a substituted program or startup file on the path could have read the
+  credential stream. `AuthedRequest.qml` now execs `/usr/bin/curl` directly
+  (no shell, `command:` is a literal argv array) with `clearEnvironment: true`
+  and an explicit `{PATH, LC_ALL}` environment, and replaces `head -c` with a
+  streamed byte-count in a `SplitParser` that SIGTERMs (then SIGKILLs) curl
+  the instant the budget is crossed — a cap that, unlike `--max-filesize`,
+  also holds against chunked responses with no declared `Content-Length`.
+  Verified live: 387 `/proc/<pid>/{cmdline,environ}` samples across a real
+  authenticated request showed only `curl -q -K -` / `PATH`, `LC_ALL` — no
+  token, no inherited `HOME`, no shell. Also moved every other bare-name
+  `Process` exec in the repo (`omarchy-launch-browser`, `omarchy-bar`,
+  `pw-play`, `xdg-open`, `python3`) to its absolute path, and
+  `makerworld-refresh`'s `python3` now also runs with `-I` (isolated mode)
+  and a minimal `clearEnvironment` environment; `bin/_mwlib.py`'s keyring
+  lookup resolves `secret-tool`'s absolute path once via `shutil.which` and
+  reuses it instead of letting each `subprocess.run` re-resolve the bare name
+  through `PATH`.
 
 - Security review follow-up: `token.json` / `config.json` are now written with
   `O_CREAT | O_EXCL | O_NOFOLLOW` on a unique same-directory temp name at mode

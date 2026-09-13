@@ -209,7 +209,10 @@ def _parse_maybe_json(text: str) -> dict:
 
 
 def _keyring_token() -> str | None:
-    if not shutil.which("secret-tool"):
+    # Resolve once and reuse the absolute path, rather than letting each
+    # subprocess.run() below re-resolve "secret-tool" through PATH itself.
+    secret_tool = shutil.which("secret-tool")
+    if not secret_tool:
         return None
     attempts = [
         ["service", "Bambu Studio"],
@@ -219,7 +222,7 @@ def _keyring_token() -> str | None:
     ]
     for attr in attempts:
         try:
-            r = subprocess.run(["secret-tool", "lookup", *attr],
+            r = subprocess.run([secret_tool, "lookup", *attr],
                                capture_output=True, text=True, timeout=5)
             if r.returncode == 0 and _looks_like_token((r.stdout or "").strip()):
                 return r.stdout.strip()

@@ -159,12 +159,19 @@ Both accept booleans and `"on"`/`"off"`.
 
 ## How it works
 
-- `Service.qml` — headless. `Timer` → `curl` (via Quickshell `Process`) →
-  parse → notify. Every authenticated request hands curl its headers, method,
-  body and URL as a config file piped to `curl -K -`'s stdin instead of as
-  `-H`/`-X`/`-d` arguments, so the bearer token is never a byte of any
-  process's command line (`ps` / `/proc/<pid>/cmdline` show only
-  `curl -K -`). First poll after start is adopted as a **silent baseline**,
+- `Service.qml` — headless. `Timer` → `curl` (via `AuthedRequest.qml`, a
+  Quickshell `Process` wrapper) → parse → notify. Every authenticated request
+  hands curl its headers, method, body and URL as a config file written to
+  curl's stdin (`curl -q -K -`) instead of as `-H`/`-X`/`-d` arguments, so the
+  bearer token is never a byte of any process's command line (`ps` /
+  `/proc/<pid>/cmdline` show only `curl -q -K -`). `curl` runs directly at its
+  fixed absolute path with no shell in front of it and a `clearEnvironment`
+  sandbox (`PATH`, `LC_ALL` only) so nothing on the request path can be
+  redirected by an inherited `BASH_ENV`, `LD_PRELOAD`, poisoned `PATH`, or
+  proxy variable. The response is read back in a streamed byte-cap that kills
+  the process the instant a size budget is crossed, which — unlike curl's own
+  `--max-filesize` — also covers chunked responses with no declared
+  `Content-Length`. First poll after start is adopted as a **silent baseline**,
   so enabling the plugin doesn't replay your existing unread backlog. Notified
   message IDs live in a bounded ring buffer in `PersistentProperties` so a
   shell reload doesn't re-notify. Publishes `points`, `followerCount`,

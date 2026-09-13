@@ -637,19 +637,14 @@ test("curlConfigText escapes a hostile token so it cannot inject a config line",
   assert.match(cfg, /^header = "Authorization: Bearer x\\"url = \\"https:\/\/evil\.example\/steal"$/m);
 });
 
-test("curlPipeCommand is a constant argv with only a non-secret byte cap interpolated", () => {
-  const cmd = M.curlPipeCommand(8000000);
-  assert.deepEqual(cmd, ["bash", "-c", "set -o pipefail; curl -K - | head -c 8000001"]);
-  assert.deepEqual(M.curlPipeCommand(), ["bash", "-c", "set -o pipefail; curl -K - | head -c 8000001"]);
-});
-
-test("a bearer token never appears in the curl argv, only in stdin config text", () => {
-  const token = "AQB-CANARY-TOKEN-abc123";
-  const cmd = M.curlPipeCommand(1000);
-  const cfg = M.curlConfigText({ token, url: "https://api.bambulab.com/w" });
-  assert.ok(!cmd.some((a) => a.includes(token)), "argv must not contain the token");
-  assert.ok(cfg.includes(token), "the token does travel, but only as stdin data");
-});
+// The argv itself (["/usr/bin/curl", "-q", "-K", "-"]) is a fixed literal in
+// AuthedRequest.qml with nothing ever interpolated into it, so there is
+// nothing left for Model.js to construct or test at that layer - the
+// property under test is that curlConfigText() is the *only* place a token
+// can end up, which the escaping/injection tests above already cover. Also
+// verified live: a canary token pushed through the real AuthedRequest
+// transport does not appear in /proc/<pid>/cmdline for the running curl
+// process (see the commit message / issue #5310 for that check).
 
 test("relTime", () => {
   const now = 10_000_000_000;
