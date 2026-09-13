@@ -9,7 +9,6 @@ non-zero exit as "sign-in expired, tell the user to run makerworld-login").
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
@@ -49,7 +48,7 @@ def main() -> int:
             print(f"refreshed - expires {mw.exp_human(new_access)}")
             return 0
 
-    print(f"refresh failed (HTTP {res.status}): {json.dumps(obj)[:500]}", file=sys.stderr)
+    print(f"refresh failed (HTTP {res.status}): {mw.safe_summary(obj)}", file=sys.stderr)
     return 1
 
 

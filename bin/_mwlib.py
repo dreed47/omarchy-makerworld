@@ -429,6 +429,38 @@ def http(method: str, url: str, token: str | None = None, payload: dict | None =
         raise SystemExit(f"network error talking to {url}: {exc}")
 
 
+# ---- Safe-to-print response summaries ---------------------------------
+#
+# Login/refresh responses can carry a token, a refresh token, a TFA session
+# key, a Set-Cookie, or (on a Bambu API change we haven't seen yet) some new
+# field of the same kind - and error paths want to show *something* useful
+# about a failed response without risking any of that. An allowlist is the
+# only safe shape for this: a blocklist fails open on exactly the case that
+# matters here (a newly introduced credential-shaped field), where an
+# allowlist fails closed - an unrecognized field is omitted, never printed.
+SAFE_RESPONSE_KEYS = {
+    "code", "message", "msg", "error", "error_description",
+    "logintype", "login_type", "status", "success", "result",
+}
+
+
+def safe_summary(obj) -> str:
+    """Render only the allowlisted, scalar-valued top-level fields of an API
+    response - everything else is counted, never shown."""
+    d = obj if isinstance(obj, dict) else {}
+    kept = []
+    omitted = 0
+    for k, v in d.items():
+        if str(k).lower() in SAFE_RESPONSE_KEYS and isinstance(v, (str, int, float, bool)):
+            s = str(v)
+            kept.append(f"{k}={s if len(s) <= 200 else s[:200] + chr(8230)}")
+        else:
+            omitted += 1
+    if omitted:
+        kept.append(f"(+{omitted} other field(s) withheld)")
+    return ", ".join(kept) if kept else "(no recognized fields; response withheld)"
+
+
 def unwrap(obj):
     d = obj
     for _ in range(4):

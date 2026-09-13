@@ -17,14 +17,14 @@ Usage:
   makerworld-login --from-slicer ~/path   # ...from a specific config dir/file
   makerworld-login --region china         # .cn account
   makerworld-login --account you@x.com --password-stdin < pwfile
-  makerworld-login --account you@x.com --password-stdin --code 123456 < pwfile
+  makerworld-login --account you@x.com --password-stdin --code-stdin < pwfile
+                                           # (password then code, one per line)
 """
 
 from __future__ import annotations
 
 import argparse
 import getpass
-import json
 import os
 import sys
 
@@ -55,6 +55,18 @@ def _needs_code(obj: dict) -> bool:
 def _tfa_key(obj: dict) -> str:
     d = obj if isinstance(obj, dict) else {}
     return d.get("tfaKey") or d.get("tfa_key") or ""
+
+
+def _read_code(args, interactive: bool, prompt: str) -> str:
+    # getpass, not input(): a verification/TFA code is short-lived but still
+    # credential-adjacent, so it's hidden the same way a password is rather
+    # than echoed to the screen and left in terminal scrollback. Never taken
+    # as a CLI argument value - see --code-stdin's help text for why.
+    if args.code_stdin:
+        return sys.stdin.readline().rstrip("\n").strip()
+    if interactive:
+        return getpass.getpass(prompt).strip()
+    return ""
 
 
 def _finish(record: dict, source: str) -> int:
@@ -133,7 +145,10 @@ def main() -> int:
     ap.add_argument("--account", help="email or phone (default: ask)")
     ap.add_argument("--password-stdin", action="store_true",
                     help="read the password from the first line of stdin instead of prompting")
-    ap.add_argument("--code", help="emailed verification / TFA code, if you already have one")
+    ap.add_argument("--code-stdin", action="store_true",
+                    help="if a verification/TFA code is needed, read it from the next line of "
+                         "stdin instead of prompting (never pass a code as a CLI argument - "
+                         "it would sit in argv/ps and shell history for as long as it's there)")
     ap.add_argument("--from-slicer", nargs="?", const=True, default=False,
                     metavar="DIR_OR_FILE",
                     help="import the token from Bambu Studio / Orca Slicer instead of logging in")
@@ -193,11 +208,9 @@ def main() -> int:
     if not tokens and _tfa_key(obj):
         key = _tfa_key(obj)
         print("This account has two-factor authentication enabled.")
-        code = (args.code or "").strip()
-        if not code and interactive:
-            code = input("Authenticator (TFA) code: ").strip()
+        code = _read_code(args, interactive, "Authenticator (TFA) code: ")
         if not code:
-            print("re-run with --code <authenticator code>", file=sys.stderr)
+            print("re-run from a terminal, or with --code-stdin < codefile", file=sys.stderr)
             return 2
         tres = mw.http("POST", mw.tfa_base(region) + "/api/sign-in/tfa",
                        payload={"tfaKey": key, "tfaCode": code})
@@ -212,8 +225,8 @@ def main() -> int:
                     tokens = {"accessToken": part[6:], "refreshToken": "", "expiresIn": None}
                     break
         if not tokens:
-            print("TFA verification did not return a token. Raw response:")
-            print(json.dumps(tobj, indent=2)[:2000])
+            print("TFA verification did not return a token.")
+            print("Response summary: " + mw.safe_summary(tobj))
             return 1
 
     if not tokens and _needs_code(obj):
@@ -224,24 +237,23 @@ def main() -> int:
                     payload={"email": account, "type": "codeLogin"})
         except SystemExit:
             pass
-        code = (args.code or "").strip()
-        if not code and interactive:
-            code = input("Email verification code: ").strip()
+        code = _read_code(args, interactive, "Email verification code: ")
         if not code:
-            print("check your email, then re-run with --code <code>", file=sys.stderr)
+            print("check your email, then re-run from a terminal, or with "
+                  "--code-stdin < codefile", file=sys.stderr)
             return 2
         vres = mw.http("POST", base + "/v1/user-service/user/login",
                        payload={"account": account, "code": code})
         vobj = vres.json() or {}
         tokens = _extract_tokens(vobj)
         if not tokens:
-            print("Code verification did not return a token. Raw response:")
-            print(json.dumps(vobj, indent=2)[:2000])
+            print("Code verification did not return a token.")
+            print("Response summary: " + mw.safe_summary(vobj))
             return 1
 
     if not tokens:
-        print("Unexpected login response - no token and no known challenge:")
-        print(json.dumps(obj, indent=2)[:2000])
+        print("Unexpected login response - no token and no known challenge.")
+        print("Response summary: " + mw.safe_summary(obj))
         print("\nYou can still use:  makerworld-token --paste  (token from browser dev tools)")
         return 1
 

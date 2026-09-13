@@ -2,6 +2,18 @@
 
 ## 0.3.0 — unreleased
 
+- Security review follow-up: `makerworld-login`'s `--code <value>` put a
+  TFA/email verification code in argv/`ps`/`/proc/<pid>/cmdline` and shell
+  history. It's gone; a code is now `getpass`-prompted (hidden entry, same as
+  the password) or read via the new `--code-stdin` flag, never a CLI value.
+  Every raw `json.dumps(response)[:2000]` error dump across the CLI tools
+  (`makerworld-login`'s TFA/code/unexpected-response paths, `makerworld-token
+  --check`, `makerworld-refresh`'s failure message) is replaced by
+  `_mwlib.safe_summary()`: an *allowlist* of known-safe scalar fields
+  (`code`, `message`, `status`, …) — everything else, specifically any field
+  we don't recognize (exactly where a new token/cookie/session field would
+  show up), is counted and withheld, never printed.
+
 - Self-review follow-up (same argv/shell/symlink classes as the marketplace
   rounds below, caught by re-auditing after they landed): `makerworld-token
   --refresh-token RT` put a refresh token in argv/`ps`/`/proc/<pid>/cmdline`

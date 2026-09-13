@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import json
 import os
 import sys
 
@@ -50,7 +49,9 @@ def check() -> int:
         name = d.get("name") or d.get("nickName") or d.get("uid") or "ok"
         print(f"token works - profile: {name}")
         return 0
-    print(f"token check failed: HTTP {res.status} {res.body[:300]!r}", file=sys.stderr)
+    d = res.json()
+    detail = mw.safe_summary(d) if d is not None else "(non-JSON response)"
+    print(f"token check failed: HTTP {res.status} {detail}", file=sys.stderr)
     return 1
 
 
