@@ -2,6 +2,15 @@
 
 ## 0.3.0 — unreleased
 
+- Security review follow-up: the bearer token no longer travels as a `curl`
+  command-line argument. Every authenticated request (`Service.qml`'s five
+  requests, `Panel.qml`'s two) now feeds curl its headers/method/body/URL as
+  a config file over `curl -K -`'s stdin, so `ps` / `/proc/<pid>/cmdline`
+  never show the token - verified with a live canary-token check. Config
+  values are escaped against curl-config injection and stripped of CR/LF
+  (header injection); the response-size double-cap (`--max-filesize` +
+  `head -c`) and no-redirect hardening apply unchanged to every request.
+
 - Security review follow-up: `token.json` / `config.json` are now written with
   `O_CREAT | O_EXCL | O_NOFOLLOW` on a unique same-directory temp name at mode
   0600, then atomically renamed — a pre-planted symlink at the temp or

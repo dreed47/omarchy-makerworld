@@ -127,20 +127,19 @@ Panel {
   property string designsError: ""
 
   function fetchDesigns() {
-    if (accessToken === "" || designsProc.running) return
+    if (accessToken === "" || designsProc.running || !svc || !svc.startAuthed) return
     root.designsLoading = true
-    designsProc.command = ["curl", "-sS", "--max-time", "25",
-      "--max-filesize", String(root.maxDesignsBytes), "--max-redirs", "0",
-      "-H", "Authorization: Bearer " + accessToken,
-      "-H", "User-Agent: bambu_network_agent/01.09.05.01",
-      "-H", "Accept: application/json",
-      "-w", "\n__HTTP__%{http_code}",
-      Model.urlMyDesigns(region, 60, 0)]
-    designsProc.running = true
+    // Reuses the service's request helper (config-on-stdin, never argv - see
+    // Service.qml startAuthed()) so the token never appears in this process's
+    // command line either.
+    svc.startAuthed(designsProc, Model.urlMyDesigns(region, 60, 0), { maxFilesizeBytes: root.maxDesignsBytes })
   }
 
   Process {
     id: designsProc
+    property string _configText: ""
+    stdinEnabled: true
+    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -190,18 +189,15 @@ Panel {
       return
     }
     var cat = root.catQueue.shift()
-    listProc.command = ["curl", "-sS", "--max-time", "20",
-      "--max-filesize", String(root.maxBodyBytes), "--max-redirs", "0",
-      "-H", "Authorization: Bearer " + accessToken,
-      "-H", "User-Agent: bambu_network_agent/01.09.05.01",
-      "-H", "Accept: application/json",
-      "-w", "\n__HTTP__%{http_code}",
-      Model.urlMessages(region, 15, 0, cat)]
-    listProc.running = true
+    if (!svc || !svc.startAuthed) { root.loading = false; return }
+    svc.startAuthed(listProc, Model.urlMessages(region, 15, 0, cat), { maxFilesizeBytes: root.maxBodyBytes })
   }
 
   Process {
     id: listProc
+    property string _configText: ""
+    stdinEnabled: true
+    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {

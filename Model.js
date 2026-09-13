@@ -960,6 +960,55 @@ function splitHttp(blob, marker) {
   };
 }
 
+// ---- Authenticated curl transport (config-on-stdin, never argv) --------
+//
+// A bearer token passed as `-H "Authorization: Bearer <token>"` sits in the
+// process's argv for as long as it runs, readable by any local user via
+// `ps` / `/proc/<pid>/cmdline`. curl's `-K -` reads its whole configuration
+// (headers, method, body, URL, all the transfer limits) from stdin instead,
+// so nothing sensitive is ever a command-line argument - only pipe data
+// between this process and curl.
+//
+// A header value can never legitimately contain a raw CR/LF (that's HTTP
+// header injection) or unescaped quote/backslash (that would break out of the
+// config file's quoted string), so those are stripped/escaped unconditionally
+// rather than trusted.
+function curlEscape(value) {
+  return String(value === undefined || value === null ? "" : value)
+    .replace(/[\r\n]/g, "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, "\\\"");
+}
+
+// opts: { token, url, method, data, extraHeaders: [...], maxFilesizeBytes,
+//         maxTimeSeconds, userAgent, statusMarker }
+function curlConfigText(opts) {
+  var o = opts || {};
+  var lines = ["silent", "show-error"];
+  lines.push("max-time = " + (parseInt(o.maxTimeSeconds, 10) || 20));
+  if (o.maxFilesizeBytes) lines.push("max-filesize = " + parseInt(o.maxFilesizeBytes, 10));
+  lines.push("max-redirs = 0");
+  if (o.token) lines.push('header = "Authorization: Bearer ' + curlEscape(o.token) + '"');
+  lines.push('header = "User-Agent: ' + curlEscape(o.userAgent || "bambu_network_agent/01.09.05.01") + '"');
+  lines.push('header = "Accept: application/json"');
+  var extra = o.extraHeaders || [];
+  for (var i = 0; i < extra.length; i++) lines.push('header = "' + curlEscape(extra[i]) + '"');
+  if (o.method) lines.push('request = "' + curlEscape(o.method) + '"');
+  if (o.data !== undefined) lines.push('data = "' + curlEscape(o.data) + '"');
+  lines.push('write-out = "\\n' + (o.statusMarker || "__HTTP__") + '%{http_code}"');
+  lines.push('url = "' + curlEscape(o.url) + '"');
+  return lines.join("\n") + "\n";
+}
+
+// A constant argv - no value is ever interpolated except the (non-secret)
+// byte cap - that reads curl's config from stdin and enforces the size cap a
+// second way: `--max-filesize` only acts on a declared Content-Length, so a
+// chunked/unknown-length response is capped here instead by `head -c`.
+function curlPipeCommand(maxBytes) {
+  var n = (parseInt(maxBytes, 10) || 8000000) + 1;
+  return ["bash", "-c", "set -o pipefail; curl -K - | head -c " + n];
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     normalizedRegion: normalizedRegion,
@@ -1028,6 +1077,9 @@ if (typeof module !== "undefined") {
     manifestVersion: manifestVersion,
     unreadChips: unreadChips,
     relTime: relTime,
-    splitHttp: splitHttp
+    splitHttp: splitHttp,
+    curlEscape: curlEscape,
+    curlConfigText: curlConfigText,
+    curlPipeCommand: curlPipeCommand
   };
 }

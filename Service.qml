@@ -281,22 +281,30 @@ Item {
 
   // ---- HTTP helpers ----------------------------------------------
   //
-  // curl carries the auth header and appends the HTTP status after a marker so
-  // onStreamFinished can tell 200 from 401 (curl without -f still prints the
-  // error body, which we want for logging). `--max-filesize` and `--max-redirs 0`
-  // keep a hostile or broken endpoint from flooding the long-lived shell with
-  // an unbounded body or bouncing the bearer token to another origin; the
-  // collectors also drop anything over `maxBodyBytes` defensively.
+  // The bearer token never becomes a command-line argument: `curl -K -` reads
+  // its whole request (headers, method, body, URL, transfer limits) as a
+  // config file piped to its stdin, so nothing sensitive is visible via `ps`
+  // or `/proc/<pid>/cmdline`. `--max-filesize` catches an over-cap response
+  // with a declared Content-Length; `head -c` behind the pipe catches one
+  // that doesn't declare a length at all; the collectors also drop anything
+  // over `maxBodyBytes` defensively once it lands in QML.
   readonly property int maxBodyBytes: 8000000
-  function curlArgs(url, extra) {
-    var a = ["curl", "-sS", "--max-time", "20",
-      "--max-filesize", String(root.maxBodyBytes), "--max-redirs", "0",
-      "-H", "Authorization: Bearer " + root.accessToken,
-      "-H", "User-Agent: bambu_network_agent/01.09.05.01",
-      "-H", "Accept: application/json"]
-    if (extra) for (var i = 0; i < extra.length; i++) a.push(extra[i])
-    a.push("-w"); a.push("\n__HTTP__%{http_code}"); a.push(url)
-    return a
+
+  // Starts (or no-ops if already running) an authenticated request on `proc`,
+  // a Process declared with `stdinEnabled: true` and an `onStarted` that
+  // writes `proc._configText` then closes stdin (see countsProc etc. below).
+  // `extra` may set `method`, `data`, `extraHeaders`, `maxFilesizeBytes`.
+  function startAuthed(proc, url, extra) {
+    if (proc.running) return
+    var e = extra || {}
+    var cap = e.maxFilesizeBytes || root.maxBodyBytes
+    var cfgOpts = { token: root.accessToken, url: url, maxFilesizeBytes: cap }
+    if (e.method) cfgOpts.method = e.method
+    if (e.data !== undefined) cfgOpts.data = e.data
+    if (e.extraHeaders) cfgOpts.extraHeaders = e.extraHeaders
+    proc.command = Model.curlPipeCommand(cap)
+    proc._configText = Model.curlConfigText(cfgOpts)
+    proc.running = true
   }
 
   // Shared guard for every collector: reject an over-cap body outright.
@@ -315,13 +323,15 @@ Item {
 
   // ---- Poll: unread counts -------------------------------------
   function pollCounts() {
-    if (!canPoll || countsProc.running) return
-    countsProc.command = curlArgs(Model.urlMessageCount(root.region))
-    countsProc.running = true
+    if (!canPoll) return
+    root.startAuthed(countsProc, Model.urlMessageCount(root.region))
   }
 
   Process {
     id: countsProc
+    property string _configText: ""
+    stdinEnabled: true
+    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -388,12 +398,14 @@ Item {
     if (messagesProc.running || root.fetchQueue.length === 0) return
     var cat = root.fetchQueue.shift()
     var limit = Math.max(10, (root.cfg.maxBurst || 5) * 3)
-    messagesProc.command = curlArgs(Model.urlMessages(root.region, limit, 0, cat))
-    messagesProc.running = true
+    root.startAuthed(messagesProc, Model.urlMessages(root.region, limit, 0, cat))
   }
 
   Process {
     id: messagesProc
+    property string _configText: ""
+    stdinEnabled: true
+    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -431,13 +443,15 @@ Item {
 
   // ---- Poll: profile (point balance + display name) --------------
   function pollProfile() {
-    if (!canPoll || profileProc.running) return
-    profileProc.command = curlArgs(Model.urlProfile(root.region))
-    profileProc.running = true
+    if (!canPoll) return
+    root.startAuthed(profileProc, Model.urlProfile(root.region))
   }
 
   Process {
     id: profileProc
+    property string _configText: ""
+    stdinEnabled: true
+    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -538,13 +552,15 @@ Item {
   // warn window and we have not warned about that boostingRightId yet, fire
   // one notification. Only runs while `boost > 0`.
   function checkBoostExpiry() {
-    if (!canPoll || boostProc.running) return
-    boostProc.command = curlArgs(Model.urlMessages(root.region, 50, 0, 3))
-    boostProc.running = true
+    if (!canPoll) return
+    root.startAuthed(boostProc, Model.urlMessages(root.region, 50, 0, 3))
   }
 
   Process {
     id: boostProc
+    property string _configText: ""
+    stdinEnabled: true
+    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -570,15 +586,16 @@ Item {
 
   // ---- Mark all read (called by the popup) -----------------------
   function markAllRead() {
-    if (!canPoll || markReadProc.running) return
-    markReadProc.command = curlArgs(
-      Model.apiBase(root.region) + Model.PATHS.messageRead,
-      ["-X", "POST", "-H", "Content-Type: application/json", "-d", "{}"])
-    markReadProc.running = true
+    if (!canPoll) return
+    root.startAuthed(markReadProc, Model.apiBase(root.region) + Model.PATHS.messageRead,
+      { method: "POST", data: "{}", extraHeaders: ["Content-Type: application/json"] })
   }
 
   Process {
     id: markReadProc
+    property string _configText: ""
+    stdinEnabled: true
+    onStarted: { write(_configText); _configText = ""; stdinEnabled = false }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {

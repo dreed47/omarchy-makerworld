@@ -160,7 +160,11 @@ Both accept booleans and `"on"`/`"off"`.
 ## How it works
 
 - `Service.qml` — headless. `Timer` → `curl` (via Quickshell `Process`) →
-  parse → notify. First poll after start is adopted as a **silent baseline**,
+  parse → notify. Every authenticated request hands curl its headers, method,
+  body and URL as a config file piped to `curl -K -`'s stdin instead of as
+  `-H`/`-X`/`-d` arguments, so the bearer token is never a byte of any
+  process's command line (`ps` / `/proc/<pid>/cmdline` show only
+  `curl -K -`). First poll after start is adopted as a **silent baseline**,
   so enabling the plugin doesn't replay your existing unread backlog. Notified
   message IDs live in a bounded ring buffer in `PersistentProperties` so a
   shell reload doesn't re-notify. Publishes `points`, `followerCount`,
