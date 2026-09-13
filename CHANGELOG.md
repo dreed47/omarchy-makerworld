@@ -2,6 +2,20 @@
 
 ## 0.3.0 — unreleased
 
+- Self-review follow-up (same argv/shell/symlink classes as the marketplace
+  rounds below, caught by re-auditing after they landed): `makerworld-token
+  --refresh-token RT` put a refresh token in argv/`ps`/`/proc/<pid>/cmdline`
+  and shell history — it's now prompted for via `getpass` alongside the
+  access token instead. `bin/_mwlib.py`'s slicer-config import
+  (`find_slicer_token`) read candidate files with a plain `open()`; it now
+  goes through the same fd-bound, `O_NOFOLLOW`, owner-checked read as our own
+  `token.json`/`config.json`, so a symlink planted in a slicer's config dir
+  can't redirect the scan at an arbitrary file. `BarWidget.qml`'s right-click
+  notification (`notify()`) was the one remaining call into `bar.run()` →
+  `bash -lc`; it now execs `omarchy-notification-send` directly as an argv
+  array via `Quickshell.execDetached`, matching every other notification path
+  in the plugin.
+
 - Security review follow-up: the bearer token no longer travels as a `curl`
   command-line argument. Every authenticated request (`Service.qml`'s five
   requests, `Panel.qml`'s two) now feeds curl its headers/method/body/URL as

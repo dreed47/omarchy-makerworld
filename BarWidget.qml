@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -33,16 +34,22 @@ BarWidget {
     if (panelLoader.item && panelLoader.item.toggle) panelLoader.item.toggle()
   }
   function notify() {
-    if (!root.bar || !panelLoader.item) return
+    if (!panelLoader.item) return
     var lines = panelLoader.item.statusLines()
     if (!lines || lines.length === 0) return
     var headline = lines.shift()
     var body = lines.join("\n")
-    var cmd = "omarchy-notification-send --app-name MakerWorld " + root.bar.shellQuote(headline)
-    if (body !== "") cmd += " " + root.bar.shellQuote(body)
+    // Argv array, no shell - `bar.run()` would go through `bash -lc`, which
+    // is otherwise unused anywhere in this plugin. Everything here is today
+    // the signed-in account's own summary text, but an argv exec needs no
+    // escaping to begin with, so there's nothing for a later change to get
+    // wrong if statusLines() ever grows a field sourced from someone else.
+    var cmd = ["/usr/bin/omarchy-notification-send", "--app-name", "MakerWorld"]
     var g = panelLoader.item.statusGlyph
-    if (g && g !== "") cmd += " -g " + root.bar.shellQuote(g)
-    root.bar.run(cmd)
+    if (g && g !== "") { cmd.push("-g"); cmd.push(String(g)) }
+    cmd.push(String(headline))
+    if (body !== "") cmd.push(String(body))
+    Quickshell.execDetached(cmd)
   }
 
   // Popout contract expected by Bar.findPanelWidget / requestPopout.

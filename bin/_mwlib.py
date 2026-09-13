@@ -60,25 +60,32 @@ def norm_region(region: str) -> str:
 
 # ---- token.json / config.json (0600, symlink-safe writes) ------------
 
-def _read_private(path: str, max_bytes: int = 1_000_000) -> str:
-    """Read a config file with an fd that refuses to follow a symlink, checks
-    that it's a plain file owned by us, and caps the size. Returns "" on any
-    problem (caller treats that as 'absent')."""
+def _read_fd_checked(path: str, max_bytes: int) -> bytes | None:
+    """Open `path` with an fd that refuses to follow a symlink, checked to be
+    a plain file owned by us, and capped at `max_bytes`. None on any problem
+    (caller treats that as 'absent'). Shared by our own config reads and by
+    the slicer-import scan below - a symlink planted at either kind of path
+    should fail the same way instead of being read through."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
     except OSError:
-        return ""
+        return None
     try:
         st = os.fstat(fd)
         if not (st.st_mode & 0o170000) == 0o100000:  # S_ISREG
-            return ""
+            return None
         if st.st_uid != os.getuid():
-            return ""
+            return None
         if st.st_size > max_bytes:
-            return ""
-        return os.read(fd, max_bytes).decode("utf-8", "replace")
+            return None
+        return os.read(fd, max_bytes)
     finally:
         os.close(fd)
+
+
+def _read_private(path: str, max_bytes: int = 1_000_000) -> str:
+    data = _read_fd_checked(path, max_bytes)
+    return data.decode("utf-8", "replace") if data is not None else ""
 
 
 def _atomic_write_private(path: str, text: str) -> None:
@@ -262,11 +269,12 @@ def find_slicer_token(explicit: str | None = None) -> dict | None:
             continue
         for fn in names[:40]:
             fp = os.path.join(d, fn)
-            if not os.path.isfile(fp) or os.path.getsize(fp) > 5_000_000:
-                continue
-            try:
-                raw = open(fp, "rb").read()
-            except OSError:
+            # Same fd-bound, no-follow, owner-checked read as our own
+            # config/token files: a symlink planted in a slicer's config dir
+            # (by anything that can already write there) must not be able to
+            # redirect this scan at an arbitrary file.
+            raw = _read_fd_checked(fp, 5_000_000)
+            if raw is None:
                 continue
             # A file that is mostly non-printable is the network agent's
             # encrypted token store - nothing we can do with it.

@@ -5,8 +5,9 @@
   makerworld-token --status
   makerworld-token --path          # print the token.json path
   makerworld-token --check         # hit /my/profile, exit 0 if the token works
-  makerworld-token --paste [--region global|china] [--refresh-token RT]
+  makerworld-token --paste [--region global|china]
                                    # store a token pasted from browser dev tools
+                                   # (also prompts for an optional refresh token)
 """
 
 from __future__ import annotations
@@ -53,7 +54,7 @@ def check() -> int:
     return 1
 
 
-def paste(region: str, refresh_token: str) -> int:
+def paste(region: str) -> int:
     print("Paste the Bearer token (the part after 'Bearer ' in the Authorization")
     print("header of a makerworld.com/api request in browser dev tools):")
     token = getpass.getpass("token: ").strip()
@@ -62,6 +63,12 @@ def paste(region: str, refresh_token: str) -> int:
     if not token:
         print("nothing pasted", file=sys.stderr)
         return 2
+    # getpass rather than a --refresh-token=... flag: a value on the command
+    # line sits in argv/`ps`/`/proc/<pid>/cmdline` and shell history for as
+    # long as it's findable there, and a refresh token outlives any single
+    # access token it mints.
+    refresh_token = getpass.getpass(
+        "refresh token (optional, press Enter to skip): ").strip()
     record = mw.load_token()
     record["accessToken"] = token
     record["region"] = mw.norm_region(region or record.get("region", "global"))
@@ -85,7 +92,6 @@ def main() -> int:
     g.add_argument("--check", action="store_true", help="verify the token against /my/profile")
     g.add_argument("--paste", action="store_true", help="store a manually pasted token")
     ap.add_argument("--region", choices=["global", "china"], help="with --paste")
-    ap.add_argument("--refresh-token", default="", help="with --paste, optional")
     args = ap.parse_args()
 
     if args.path:
@@ -94,7 +100,7 @@ def main() -> int:
     if args.check:
         return check()
     if args.paste:
-        return paste(args.region, args.refresh_token)
+        return paste(args.region)
     return show_status()
 
 
